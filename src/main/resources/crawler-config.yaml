@@ -1,0 +1,30 @@
+config:
+  # HTTP Protokoll-Konfiguration
+  http.agent.name: "StudyChat-Bot"
+  http.agent.version: "1.0"
+  http.agent.description: "StudyChat Web Crawler für Hochschule Heilbronn"
+  http.agent.url: "https://www.hs-heilbronn.de"
+  http.agent.email: "contact@example.com"
+
+  # Parser-Konfiguration
+  # Wichtig: Boolean-Werte als true/false (ohne Anführungszeichen) schreiben!
+  parser.emitOutlinks: true
+  parser.emitOutlinks.url.filters: false
+
+  # Fetcher-Konfiguration
+  fetcher.server.delay: 1.0
+  fetcher.threads.number: 50
+  fetcher.threads.per.queue: 1
+  fetcher.max.urls: -1
+
+  # Diese Werte als true/false (ohne Anführungszeichen) definieren
+  http.content.limit.enabled: true
+  topology.debug: false
+
+  # Storm-Crawler-Konfiguration
+  topology.workers: 1
+  topology.message.timeout.secs: 300
+  topology.max.spout.pending: 100
+
+  # Queue-Konfiguration
+  scheduler.class: "com.digitalpebble.stormcrawler.persistence.DefaultScheduler"

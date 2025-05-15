@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyChat - Chat mit KI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .chat-container {
+            height: 70vh;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            scrollbar-width: thin;
+        }
+        .message {
+            padding: 12px 16px;
+            border-radius: 18px;
+            margin-bottom: 15px;
+            max-width: 80%;
+            position: relative;
+            line-height: 1.5;
+        }
+        .user-message {
+            background-color: #dcf8c6;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+        .ai-message {
+            background-color: #f1f0f0;
+            margin-right: auto;
+            box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+            border-bottom-left-radius: 4px;
+        }
+        .message-time {
+            font-size: 0.7rem;
+            color: #999;
+            margin-top: 5px;
+            text-align: right;
+        }
+        .data-selector {
+            margin-bottom: 20px;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .typing-indicator {
+            display: none;
+            margin-right: auto;
+            background-color: #e6e6e6;
+            padding: 10px 15px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+        }
+        .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #888;
+            animation: wave 1.3s linear infinite;
+            margin-right: 3px;
+        }
+        .dot:nth-child(2) {
+            animation-delay: -1.1s;
+        }
+        .dot:nth-child(3) {
+            animation-delay: -0.9s;
+        }
+        @keyframes wave {
+            0%, 60%, 100% {
+                transform: initial;
+            }
+            30% {
+                transform: translateY(-5px);
+            }
+        }
+        .form-container {
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .app-header {
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .badge-crawl-status {
+            font-size: 85%;
+            padding: 0.35em 0.65em;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+        <a class="navbar-brand" href="/">
+            <i class="bi bi-robot me-2"></i>StudyChat
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="/">
+                        <i class="bi bi-globe me-1"></i>Crawler
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" href="/chat">
+                        <i class="bi bi-chat-dots me-1"></i>Chat
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="app-header">
+                <h1><i class="bi bi-chat-dots me-2"></i>Chat mit der KI über gecrawlte Daten</h1>
+                <p class="lead">Wähle einen Datensatz und stelle Fragen zu den gecrawlten Inhalten.</p>
+            </div>
+
+            <div class="data-selector">
+                <label for="datasetSelect" class="form-label">
+                    <i class="bi bi-database me-2"></i>Datenset auswählen:
+                </label>
+                <select class="form-select" id="datasetSelect">
+                    <option value="">Bitte wählen...</option>
+                    <option th:each="job : ${crawlJobs}" th:value="${job.id}"
+                            th:text="${job.seedUrls[0] + ' (' + job.createdAt + ')'}">
+                        Website (Datum)
+                    </option>
+                </select>
+                <div class="mt-2 text-muted small" id="datasetInfo" style="display: none;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <span>Ausgewählter Datensatz: <span id="selectedDatasetName">-</span></span>
+                    <span class="ms-2">URLs gecrawlt: <span id="crawledUrlsCount">0</span></span>
+                </div>
+            </div>
+
+            <div class="chat-container" id="chatContainer">
+                <div class="ai-message message">
+                    <div>Hallo! Ich bin dein StudyChat-Assistent. Wähle ein Datenset aus und stelle mir Fragen zu den gecrawlten Inhalten.</div>
+                    <div class="message-time">Jetzt</div>
+                </div>
+                <div class="typing-indicator" id="typingIndicator">
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                </div>
+            </div>
+
+            <div class="mt-3 form-container">
+                <form id="messageForm" class="d-flex">
+                    <input type="text" class="form-control me-2" id="messageInput" placeholder="Stelle eine Frage..." disabled>
+                    <button type="submit" class="btn btn-primary" disabled id="sendButton">
+                        <i class="bi bi-send"></i> Senden
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const chatContainer = document.getElementById('chatContainer');
+        const messageForm = document.getElementById('messageForm');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const datasetSelect = document.getElementById('datasetSelect');
+        const typingIndicator = document.getElementById('typingIndicator');
+        const datasetInfo = document.getElementById('datasetInfo');
+        const selectedDatasetName = document.getElementById('selectedDatasetName');
+        const crawledUrlsCount = document.getElementById('crawledUrlsCount');
+
+        let selectedJobId = null;
+
+        // Event Listener für die Datenset-Auswahl
+        datasetSelect.addEventListener('change', function() {
+            selectedJobId = this.value;
+            if (selectedJobId) {
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+
+                // Option-Text abrufen und im Info-Bereich anzeigen
+                const option = datasetSelect.options[datasetSelect.selectedIndex];
+                selectedDatasetName.textContent = option.text;
+                datasetInfo.style.display = 'block';
+
+                // Job-Details abrufen
+                fetchJobDetails(selectedJobId);
+
+                // Systemnachricht hinzufügen
+                addMessage(`Datenset "${option.text}" ausgewählt. Du kannst jetzt Fragen stellen.`, 'ai');
+
+                // Chat-Historie für diesen Job laden
+                loadChatHistory(selectedJobId);
+            } else {
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                datasetInfo.style.display = 'none';
+            }
+        });
+
+        // Job-Details abrufen
+        function fetchJobDetails(jobId) {
+            fetch(`/api/jobs/${jobId}`)
+                .then(response => response.json())
+                .then(data => {
+                    crawledUrlsCount.textContent = data.crawledUrlsCount || 0;
+                })
+                .catch(error => {
+                    console.error('Error fetching job details:', error);
+                });
+        }
+
+        // Chat-Historie laden
+        function loadChatHistory(jobId) {
+            fetch(`/api/chat/history/${jobId}`)
+                .then(response => response.json())
+                .then(messages => {
+                    // Chat-Container leeren (außer der Begrüßungsnachricht)
+                    while (chatContainer.children.length > 2) { // Behalte das erste Element und den Typing-Indikator
+                        chatContainer.removeChild(chatContainer.children[1]);
+                    }
+
+                    // Nachrichten hinzufügen
+                    if (messages && messages.length > 0) {
+                        messages.forEach(msg => {
+                            if (msg.userMessage) {
+                                addMessage(msg.userMessage, 'user');
+                            }
+                            if (msg.aiResponse) {
+                                addMessage(msg.aiResponse, 'ai');
+                            }
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading chat history:', error);
+                });
+        }
+
+        // Event Listener für das Nachrichtenformular
+        messageForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const message = messageInput.value.trim();
+            if (!message || !selectedJobId) return;
+
+            // Nachricht des Benutzers anzeigen
+            addMessage(message, 'user');
+            messageInput.value = '';
+
+            // Typing-Indikator anzeigen
+            typingIndicator.style.display = 'block';
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // Anfrage an den Server senden
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    jobId: selectedJobId,
+                    message: message
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Typing-Indikator ausblenden
+                    typingIndicator.style.display = 'none';
+
+                    // Antwort der KI anzeigen
+                    addMessage(data.response, 'ai');
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    typingIndicator.style.display = 'none';
+                    addMessage('Es ist ein Fehler aufgetreten. Bitte versuche es später erneut.', 'ai');
+                });
+        });
+
+        // Funktion zum Hinzufügen einer Nachricht zum Chat
+        function addMessage(text, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = sender === 'user' ? 'user-message message' : 'ai-message message';
+
+            const messageText = document.createElement('div');
+            messageText.textContent = text;
+
+            const messageTime = document.createElement('div');
+            messageTime.className = 'message-time';
+            messageTime.textContent = getCurrentTime();
+
+            messageDiv.appendChild(messageText);
+            messageDiv.appendChild(messageTime);
+
+            // Füge vor dem typing-indicator ein
+            chatContainer.insertBefore(messageDiv, typingIndicator);
+
+            // Scroll to bottom
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Hilfsfunktion zum Formatieren der aktuellen Zeit
+        function getCurrentTime() {
+            const now = new Date();
+            return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+    });
+</script>
+</body>
+</html>

@@ -10,6 +10,11 @@ import com.hhn.studyChat.util.bolt.RAGJSONFileWriterBolt;
 import org.apache.storm.topology.TopologyBuilder;
 import org.apache.storm.tuple.Fields;
 
+import java.util.Properties;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.File;
+
 /**
  * Topologie für Web-Crawling
  */
@@ -34,8 +39,52 @@ public class CrawlTopology extends ConfigurableTopology {
 	protected int run(String[] args) {
 		// Die von der Elternklasse geerbte Konfiguration verwenden
 
+		// Konfiguration aus der Eigenschaftsdatei laden
+		loadCustomConfiguration();
+
 		// Topologie erstellen und einreichen
 		return submit("crawl", conf, createTopology());
+	}
+
+	/**
+	 * Lädt benutzerdefinierte Konfigurationen aus einer Properties-Datei
+	 */
+	private void loadCustomConfiguration() {
+		try {
+			// Zuerst versuchen, die Datei im Ressourcenverzeichnis zu finden
+			InputStream is = getClass().getClassLoader().getResourceAsStream("crawler-config.properties");
+
+			// Wenn nicht als Ressource verfügbar, als Datei im aktuellen Verzeichnis suchen
+			if (is == null) {
+				File file = new File("crawler-config.properties");
+				if (file.exists()) {
+					is = new FileInputStream(file);
+				}
+			}
+
+			// Wenn eine Konfigurationsdatei gefunden wurde, laden
+			if (is != null) {
+				Properties props = new Properties();
+				props.load(is);
+
+				// Alle Properties in die Storm-Konfiguration übertragen
+				for (String key : props.stringPropertyNames()) {
+					conf.put(key, props.getProperty(key));
+				}
+
+				is.close();
+				System.out.println("Crawler-Konfiguration erfolgreich geladen.");
+			} else {
+				System.err.println("WARNUNG: crawler-config.properties nicht gefunden. Verwende Standardkonfiguration.");
+				// Mindestens den HTTP-Agent setzen, um den Fehler zu vermeiden
+				conf.put("http.agent.name", "StudyChat-Bot/1.0");
+			}
+		} catch (Exception e) {
+			System.err.println("Fehler beim Laden der Crawler-Konfiguration: " + e.getMessage());
+			e.printStackTrace();
+			// Mindestens den HTTP-Agent setzen, um den Fehler zu vermeiden
+			conf.put("http.agent.name", "StudyChat-Bot/1.0");
+		}
 	}
 
 	public TopologyBuilder createTopology() {

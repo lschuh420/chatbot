@@ -10,12 +10,21 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 @Service
 public class CrawlerService {
 
     private final Map<String, CrawlJob> jobs = new ConcurrentHashMap<>();
     private final ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+    // Optional: Dependency Injection für RAGService
+    private RAGService ragService;
+
+    // Setter für RAGService (vermeidet zirkuläre Abhängigkeit)
+    public void setRagService(RAGService ragService) {
+        this.ragService = ragService;
+    }
 
     // Erstelle einen neuen Crawling-Job
     public CrawlJob createJob(List<String> seedUrls, int maxDepth, String outputDir) {
@@ -47,6 +56,15 @@ public class CrawlerService {
                 // Nach erfolgreichem Abschluss
                 job.setStatus("COMPLETED");
                 job.setCompletedAt(LocalDateTime.now());
+
+                // Optional: RAG-System für diesen Job initialisieren
+                if (ragService != null) {
+                    try {
+                        ragService.updateForNewCompletedJob(job.getId());
+                    } catch (Exception e) {
+                        System.err.println("Fehler beim Initialisieren des RAG-Systems: " + e.getMessage());
+                    }
+                }
             } catch (Exception e) {
                 job.setStatus("FAILED");
                 job.setCompletedAt(LocalDateTime.now());
@@ -64,6 +82,13 @@ public class CrawlerService {
     // Liste alle Jobs
     public List<CrawlJob> getAllJobs() {
         return new ArrayList<>(jobs.values());
+    }
+
+    // Liste alle abgeschlossenen Jobs
+    public List<CrawlJob> getCompletedJobs() {
+        return jobs.values().stream()
+                .filter(job -> "COMPLETED".equals(job.getStatus()))
+                .collect(Collectors.toList());
     }
 
     // Aktualisiere Job-Statistiken
