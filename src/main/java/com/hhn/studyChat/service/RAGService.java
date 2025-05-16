@@ -56,6 +56,7 @@ public class RAGService {
     // Modelle und Stores für Langchain4j
     private EmbeddingModel embeddingModel;
     private ChatLanguageModel chatModel;
+    private OpenAiChatModel openAiChatModel;
     private final Map<String, EmbeddingStore<TextSegment>> embeddingStores = new ConcurrentHashMap<>();
 
     // Konstanten
@@ -72,12 +73,18 @@ public class RAGService {
         // Embedding-Modell initialisieren (lokales Modell)
         embeddingModel = new AllMiniLmL6V2EmbeddingModel();
 
-        // Chat-Modell initialisieren (hier OpenAI, könnte auch durch ein lokales Modell ersetzt werden)
-        chatModel = OpenAiChatModel.builder()
-                .apiKey(openaiApiKey)
-                .modelName("gpt-3.5-turbo")
-                .temperature(0.7)
+        openAiChatModel = OpenAiChatModel.builder()
+                .baseUrl("http://langchain4j.dev/demo/openai/v1")
+                .apiKey("demo")
+                .modelName("gpt-4o-mini")
                 .build();
+
+        // Chat-Modell initialisieren (hier OpenAI, könnte auch durch ein lokales Modell ersetzt werden)
+//        chatModel = OpenAiChatModel.builder()
+//                .apiKey(openaiApiKey)
+//                .modelName("gpt-3.5-turbo")
+//                .temperature(0.7)
+//                .build();
 
         // Initialisieren des RAG-Systems für alle abgeschlossenen Jobs
         List<CrawlJob> completedJobs = crawlerService.getCompletedJobs();
@@ -283,7 +290,10 @@ public class RAGService {
             );
 
             // Antwort vom LLM generieren
-            return chatModel.generate(prompt);
+            return openAiChatModel.generate(prompt);
+
+
+            //return chatModel.generate(prompt);
 
         } catch (Exception e) {
             System.err.println("Fehler bei der Generierung der Antwort: " + e.getMessage());
