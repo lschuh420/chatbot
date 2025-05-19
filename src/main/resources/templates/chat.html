@@ -5,38 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StudyChat - Chat mit KI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <style>
-        body {
-            background-color: #f8f9fa;
-        }
         .chat-container {
             height: 70vh;
             overflow-y: auto;
             padding: 20px;
-            background-color: #fff;
+            background-color: #f8f9fa;
             border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            scrollbar-width: thin;
         }
         .message {
-            padding: 12px 16px;
-            border-radius: 18px;
-            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 20px;
+            margin-bottom: 10px;
             max-width: 80%;
             position: relative;
-            line-height: 1.5;
         }
         .user-message {
             background-color: #dcf8c6;
             margin-left: auto;
-            border-bottom-right-radius: 4px;
         }
         .ai-message {
-            background-color: #f1f0f0;
+            background-color: #ffffff;
             margin-right: auto;
-            box-shadow: 0 1px 1px rgba(0,0,0,0.1);
-            border-bottom-left-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
         .message-time {
             font-size: 0.7rem;
@@ -46,10 +37,6 @@
         }
         .data-selector {
             margin-bottom: 20px;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
         .typing-indicator {
             display: none;
@@ -64,7 +51,7 @@
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background-color: #888;
+            background-color: #999;
             animation: wave 1.3s linear infinite;
             margin-right: 3px;
         }
@@ -82,45 +69,27 @@
                 transform: translateY(-5px);
             }
         }
-        .form-container {
-            background-color: #fff;
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        .app-header {
-            background-color: #fff;
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        .badge-crawl-status {
-            font-size: 85%;
-            padding: 0.35em 0.65em;
+        .job-info {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 5px;
         }
     </style>
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container">
-        <a class="navbar-brand" href="/">
-            <i class="bi bi-robot me-2"></i>StudyChat
-        </a>
+        <a class="navbar-brand" href="/">StudyChat</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav">
                 <li class="nav-item">
-                    <a class="nav-link" href="/">
-                        <i class="bi bi-globe me-1"></i>Crawler
-                    </a>
+                    <a class="nav-link" href="/">Crawler</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link active" href="/chat">
-                        <i class="bi bi-chat-dots me-1"></i>Chat
-                    </a>
+                    <a class="nav-link active" href="/chat">Chat</a>
                 </li>
             </ul>
         </div>
@@ -130,27 +99,21 @@
 <div class="container mt-4">
     <div class="row">
         <div class="col-md-12">
-            <div class="app-header">
-                <h1><i class="bi bi-chat-dots me-2"></i>Chat mit der KI über gecrawlte Daten</h1>
-                <p class="lead">Wähle einen Datensatz und stelle Fragen zu den gecrawlten Inhalten.</p>
-            </div>
+            <h1>Chat mit der KI über gecrawlte Daten</h1>
 
             <div class="data-selector">
-                <label for="datasetSelect" class="form-label">
-                    <i class="bi bi-database me-2"></i>Datenset auswählen:
-                </label>
+                <label for="datasetSelect" class="form-label">Datenset auswählen:</label>
                 <select class="form-select" id="datasetSelect">
                     <option value="">Bitte wählen...</option>
-                    <option th:each="job : ${crawlJobs}" th:value="${job.id}"
-                            th:text="${job.seedUrls[0] + ' (' + job.createdAt + ')'}">
-                        Website (Datum)
-                    </option>
+                    <optgroup th:if="${!#lists.isEmpty(crawlJobs)}" label="Verfügbare Datensets">
+                        <option th:each="job : ${crawlJobs}"
+                                th:value="${job.id}"
+                                th:text="${job.seedUrls[0] + ' (' + #temporals.format(job.createdAt, 'dd.MM.yyyy HH:mm') + ')'}">
+                            Website (Datum)
+                        </option>
+                    </optgroup>
                 </select>
-                <div class="mt-2 text-muted small" id="datasetInfo" style="display: none;">
-                    <i class="bi bi-info-circle me-1"></i>
-                    <span>Ausgewählter Datensatz: <span id="selectedDatasetName">-</span></span>
-                    <span class="ms-2">URLs gecrawlt: <span id="crawledUrlsCount">0</span></span>
-                </div>
+                <div class="job-info mt-2" id="jobInfo"></div>
             </div>
 
             <div class="chat-container" id="chatContainer">
@@ -165,12 +128,10 @@
                 </div>
             </div>
 
-            <div class="mt-3 form-container">
+            <div class="mt-3">
                 <form id="messageForm" class="d-flex">
                     <input type="text" class="form-control me-2" id="messageInput" placeholder="Stelle eine Frage..." disabled>
-                    <button type="submit" class="btn btn-primary" disabled id="sendButton">
-                        <i class="bi bi-send"></i> Senden
-                    </button>
+                    <button type="submit" class="btn btn-primary" disabled id="sendButton">Senden</button>
                 </form>
             </div>
         </div>
@@ -186,9 +147,7 @@
         const sendButton = document.getElementById('sendButton');
         const datasetSelect = document.getElementById('datasetSelect');
         const typingIndicator = document.getElementById('typingIndicator');
-        const datasetInfo = document.getElementById('datasetInfo');
-        const selectedDatasetName = document.getElementById('selectedDatasetName');
-        const crawledUrlsCount = document.getElementById('crawledUrlsCount');
+        const jobInfo = document.getElementById('jobInfo');
 
         let selectedJobId = null;
 
@@ -199,64 +158,34 @@
                 messageInput.disabled = false;
                 sendButton.disabled = false;
 
-                // Option-Text abrufen und im Info-Bereich anzeigen
-                const option = datasetSelect.options[datasetSelect.selectedIndex];
-                selectedDatasetName.textContent = option.text;
-                datasetInfo.style.display = 'block';
+                // Zeige Job-Informationen an
+                const selectedOption = datasetSelect.options[datasetSelect.selectedIndex];
 
-                // Job-Details abrufen
-                fetchJobDetails(selectedJobId);
+                // Suche nach dem ausgewählten Job
+                fetch('/api/jobs/' + selectedJobId)
+                    .then(response => response.json())
+                    .then(job => {
+                        // Jobinformationen anzeigen
+                        jobInfo.innerHTML = `
+                                <strong>Domain:</strong> ${job.seedUrls.join(', ')} <br>
+                                <strong>Gecrawlte URLs:</strong> ${job.crawledUrlsCount} <br>
+                                <strong>Abgeschlossen:</strong> ${new Date(job.completedAt).toLocaleString()} <br>
+                                <strong>Ausgabeverzeichnis:</strong> ${job.outputDirectory}
+                            `;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching job details:', error);
+                        jobInfo.textContent = 'Jobinformationen konnten nicht geladen werden.';
+                    });
 
                 // Systemnachricht hinzufügen
-                addMessage(`Datenset "${option.text}" ausgewählt. Du kannst jetzt Fragen stellen.`, 'ai');
-
-                // Chat-Historie für diesen Job laden
-                loadChatHistory(selectedJobId);
+                addMessage(`Datenset "${selectedOption.text}" ausgewählt. Du kannst jetzt Fragen stellen.`, 'ai');
             } else {
                 messageInput.disabled = true;
                 sendButton.disabled = true;
-                datasetInfo.style.display = 'none';
+                jobInfo.innerHTML = '';
             }
         });
-
-        // Job-Details abrufen
-        function fetchJobDetails(jobId) {
-            fetch(`/api/jobs/${jobId}`)
-                .then(response => response.json())
-                .then(data => {
-                    crawledUrlsCount.textContent = data.crawledUrlsCount || 0;
-                })
-                .catch(error => {
-                    console.error('Error fetching job details:', error);
-                });
-        }
-
-        // Chat-Historie laden
-        function loadChatHistory(jobId) {
-            fetch(`/api/chat/history/${jobId}`)
-                .then(response => response.json())
-                .then(messages => {
-                    // Chat-Container leeren (außer der Begrüßungsnachricht)
-                    while (chatContainer.children.length > 2) { // Behalte das erste Element und den Typing-Indikator
-                        chatContainer.removeChild(chatContainer.children[1]);
-                    }
-
-                    // Nachrichten hinzufügen
-                    if (messages && messages.length > 0) {
-                        messages.forEach(msg => {
-                            if (msg.userMessage) {
-                                addMessage(msg.userMessage, 'user');
-                            }
-                            if (msg.aiResponse) {
-                                addMessage(msg.aiResponse, 'ai');
-                            }
-                        });
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading chat history:', error);
-                });
-        }
 
         // Event Listener für das Nachrichtenformular
         messageForm.addEventListener('submit', function(e) {
