@@ -42,7 +42,7 @@ public class TopologyRunner {
 
             // Warte auf Abschluss (z.B. 5 Minuten oder spezifisches Event)
             System.out.println("Topology gestartet, warte auf Abschluss...");
-            Thread.sleep(300000); // 5 Minuten
+            Thread.sleep(300); // 5 Minuten
 
             // Topologie herunterfahren
             System.out.println("Beende Topology...");
@@ -67,7 +67,7 @@ public class TopologyRunner {
                 }
             }
 
-            // Wenn eine Konfigurationsdatei gefunden wurde, laden
+            // Wenn eine Konfigurationsdatei gefunden wurde, ladenä
             if (is != null) {
                 Properties props = new Properties();
                 props.load(is);
