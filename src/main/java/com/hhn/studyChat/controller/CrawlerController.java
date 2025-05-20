@@ -31,7 +31,7 @@ public class CrawlerController {
     @PostMapping("/api/jobs")
     public ResponseEntity<CrawlJob> createJob(@RequestParam("url") List<String> urls,
                                               @RequestParam(value = "depth", defaultValue = "1") int depth,
-                                              @RequestParam(value = "outputDir", defaultValue = "./output") String outputDir) {
+                                              @RequestParam(value = "outputDir", defaultValue = "./collected-content") String outputDir) {
         CrawlJob job = crawlerService.createJob(urls, depth, outputDir);
         return ResponseEntity.ok(job);
     }

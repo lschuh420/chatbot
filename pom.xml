@@ -168,6 +168,30 @@
 			<artifactId>langchain4j-open-ai</artifactId>
 			<version>${langchain4j.version}</version>
 		</dependency>
+
+		<!-- Qdrant Java Client -->
+		<dependency>
+			<groupId>io.qdrant</groupId>
+			<artifactId>client</artifactId>
+			<version>1.7.1</version>
+		</dependency>
+
+		<!-- gRPC Abhängigkeiten -->
+		<dependency>
+			<groupId>io.grpc</groupId>
+			<artifactId>grpc-netty-shaded</artifactId>
+			<version>1.59.0</version>
+		</dependency>
+		<dependency>
+			<groupId>io.grpc</groupId>
+			<artifactId>grpc-protobuf</artifactId>
+			<version>1.59.0</version>
+		</dependency>
+		<dependency>
+			<groupId>io.grpc</groupId>
+			<artifactId>grpc-stub</artifactId>
+			<version>1.59.0</version>
+		</dependency>
 	</dependencies>
 
 	<build>

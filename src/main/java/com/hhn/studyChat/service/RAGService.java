@@ -13,14 +13,16 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
-import dev.langchain4j.data.document.Metadata; // Importiere die Metadata-Klasse direkt
+import dev.langchain4j.data.document.Metadata;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,14 +32,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.annotation.PostConstruct;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.MediaType;
+import okhttp3.RequestBody;
 
 @Service
 public class RAGService {
+    private static final Logger logger = LoggerFactory.getLogger(RAGService.class);
 
     private final CrawlerService crawlerService;
 
@@ -50,6 +57,9 @@ public class RAGService {
     @Value("${openai.api.key:your-api-key}")
     private String openaiApiKey;
 
+    @Value("${use.inmemory.store:true}")
+    private boolean useInMemoryStore;
+
     // In-Memory-Cache für RAG-Dokumente nach jobId
     private final Map<String, List<RAGDocument>> documentCache = new ConcurrentHashMap<>();
 
@@ -58,10 +68,14 @@ public class RAGService {
     private ChatLanguageModel chatModel;
     private OpenAiChatModel openAiChatModel;
     private final Map<String, EmbeddingStore<TextSegment>> embeddingStores = new ConcurrentHashMap<>();
+    private final OkHttpClient httpClient = new OkHttpClient();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // Konstanten
     private static final int CHUNK_SIZE = 500;
     private static final int CHUNK_OVERLAP = 50;
+    private static final int EMBEDDING_SIZE = 384; // Für AllMiniLmL6V2EmbeddingModel
+    private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     @Autowired
     public RAGService(CrawlerService crawlerService) {
@@ -71,30 +85,77 @@ public class RAGService {
     @PostConstruct
     public void init() {
         // Embedding-Modell initialisieren (lokales Modell)
+        logger.info("Initialisiere Embedding-Modell...");
         embeddingModel = new AllMiniLmL6V2EmbeddingModel();
 
+        // Chat-Modell initialisieren
+        logger.info("Initialisiere Chat-Modell...");
         openAiChatModel = OpenAiChatModel.builder()
                 .baseUrl("http://langchain4j.dev/demo/openai/v1")
                 .apiKey("demo")
                 .modelName("gpt-4o-mini")
                 .build();
 
-        // Chat-Modell initialisieren (hier OpenAI, könnte auch durch ein lokales Modell ersetzt werden)
-//        chatModel = OpenAiChatModel.builder()
-//                .apiKey(openaiApiKey)
-//                .modelName("gpt-3.5-turbo")
-//                .temperature(0.7)
-//                .build();
-
         // Initialisieren des RAG-Systems für alle abgeschlossenen Jobs
+        logger.info("Initialisiere RAG-System für alle abgeschlossenen Jobs...");
         List<CrawlJob> completedJobs = crawlerService.getCompletedJobs();
         for (CrawlJob job : completedJobs) {
             try {
                 initializeEmbeddingStoreForJob(job.getId());
             } catch (Exception e) {
-                // Log-Fehler
-                System.err.println("Fehler beim Initialisieren des RAG-Systems für Job " + job.getId() + ": " + e.getMessage());
+                logger.error("Fehler beim Initialisieren des RAG-Systems für Job {}: {}", job.getId(), e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Prüft, ob eine Qdrant-Collection existiert
+     */
+    private boolean collectionExists(String collectionName) {
+        try {
+            String url = String.format("http://%s:%d/collections/%s", qdrantHost, qdrantPort, collectionName);
+            Request request = new Request.Builder()
+                    .url(url)
+                    .get()
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                return response.isSuccessful(); // 200 OK bedeutet, Collection existiert
+            }
+        } catch (Exception e) {
+            logger.error("Fehler beim Prüfen der Collection {}: {}", collectionName, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Erstellt eine neue Qdrant-Collection
+     */
+    private boolean createCollection(String collectionName) {
+        try {
+            String url = String.format("http://%s:%d/collections/%s", qdrantHost, qdrantPort, collectionName);
+
+            // JSON-Payload für die Collection-Erstellung
+            String json = String.format(
+                    "{\n" +
+                            "  \"vectors\": {\n" +
+                            "    \"size\": %d,\n" +
+                            "    \"distance\": \"Cosine\"\n" +
+                            "  }\n" +
+                            "}", EMBEDDING_SIZE);
+
+            RequestBody body = RequestBody.create(json, JSON);
+            Request request = new Request.Builder()
+                    .url(url)
+                    .put(body)
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                return response.isSuccessful();
+            }
+        } catch (Exception e) {
+            logger.error("Fehler beim Erstellen der Collection {}: {}", collectionName, e.getMessage());
+            return false;
         }
     }
 
@@ -109,47 +170,122 @@ public class RAGService {
 
         // Prüfen, ob bereits initialisiert
         if (embeddingStores.containsKey(jobId)) {
+            logger.info("Embedding-Store für Job {} bereits initialisiert", jobId);
             return;
         }
 
-        // Qdrant Collection für diesen Job erstellen
-        EmbeddingStore<TextSegment> embeddingStore = QdrantEmbeddingStore.builder()
-                .host(qdrantHost)
-                .port(qdrantPort)
-                .collectionName("job_" + jobId.replace("-", "_"))
-                .build();
+        String collectionName = "job_" + jobId.replace("-", "_");
+        EmbeddingStore<TextSegment> embeddingStore;
+
+        // Wenn In-Memory-Store konfiguriert ist, diesen verwenden
+        if (useInMemoryStore) {
+            logger.info("Verwende In-Memory-Store für Job {}", jobId);
+            embeddingStore = new InMemoryEmbeddingStore<>();
+        } else {
+            // Versuche Qdrant zu verwenden, mit Fallback zu In-Memory-Store
+            try {
+                // Prüfe, ob Qdrant erreichbar ist
+                logger.info("Prüfe, ob Qdrant-Server erreichbar ist...");
+                if (isQdrantReachable()) {
+                    // Prüfe, ob Collection existiert
+                    if (!collectionExists(collectionName)) {
+                        logger.info("Collection {} existiert nicht. Wird erstellt...", collectionName);
+                        boolean created = createCollection(collectionName);
+                        if (!created) {
+                            throw new IOException("Konnte Collection nicht erstellen");
+                        }
+                        logger.info("Collection {} erfolgreich erstellt", collectionName);
+                    } else {
+                        logger.info("Collection {} existiert bereits", collectionName);
+                    }
+
+                    // QdrantEmbeddingStore initialisieren
+                    embeddingStore = QdrantEmbeddingStore.builder()
+                            .host(qdrantHost)
+                            .port(qdrantPort)
+                            .collectionName(collectionName)
+                            .build();
+
+                    logger.info("Verbindung zu Qdrant (Port {}) erfolgreich", qdrantPort);
+                } else {
+                    throw new IOException("Qdrant-Server nicht erreichbar");
+                }
+            } catch (Exception e) {
+                logger.error("Fehler bei der Verbindung zu Qdrant: {}", e.getMessage());
+                logger.info("Verwende In-Memory-Store als Fallback");
+                embeddingStore = new InMemoryEmbeddingStore<>();
+            }
+        }
 
         embeddingStores.put(jobId, embeddingStore);
 
         // Gecrawlte JSON-Dateien laden und indexieren
+        logger.info("Lade Dokumente aus Crawl-Job {}...", jobId);
         List<RAGDocument> documents = loadDocumentsFromCrawlJob(job);
         documentCache.put(jobId, documents);
+        logger.info("{} Dokumente geladen", documents.size());
 
         // Dokumente chunken und embedden
+        logger.info("Erstelle Embeddings für {} Dokumente...", documents.size());
+        int processedCount = 0;
         for (RAGDocument doc : documents) {
-            // Erstelle Metadata-Objekt und befülle es
-            Metadata metadata = new Metadata();
-            metadata.add("url", doc.getUrl());
-            metadata.add("title", doc.getTitle());
-            metadata.add("category", doc.getCategory());
+            try {
+                if (doc.getContent() == null || doc.getContent().trim().isEmpty()) {
+                    logger.warn("Überspringe Dokument {} mit leerem Inhalt", doc.getId());
+                    continue;
+                }
 
-            // Erstelle Document mit dem Text und den Metadaten
-            Document langchainDoc = Document.from(doc.getContent(), metadata);
+                // Erstelle Metadata-Objekt und befülle es
+                Metadata metadata = new Metadata();
+                metadata.add("url", doc.getUrl());
+                metadata.add("title", doc.getTitle());
+                metadata.add("category", doc.getCategory());
 
-            // Dokument in Chunks aufteilen
-            DocumentSplitter splitter = DocumentSplitters.recursive(CHUNK_SIZE, CHUNK_OVERLAP);
-            List<TextSegment> segments = splitter.split(langchainDoc).stream()
-                    .map(doc1 -> (TextSegment) doc1)
-                    .collect(Collectors.toList());
+                // Erstelle Document mit dem Text und den Metadaten
+                Document langchainDoc = Document.from(doc.getContent(), metadata);
 
-            // Embeddings erzeugen und speichern
-            for (TextSegment segment : segments) {
-                Embedding embedding = embeddingModel.embed(segment).content();
-                embeddingStore.add(embedding, segment);
+                // Dokument in Chunks aufteilen
+                DocumentSplitter splitter = DocumentSplitters.recursive(CHUNK_SIZE, CHUNK_OVERLAP);
+                List<TextSegment> segments = splitter.split(langchainDoc).stream()
+                        .map(doc1 -> (TextSegment) doc1)
+                        .collect(Collectors.toList());
+
+                // Embeddings erzeugen und speichern
+                for (TextSegment segment : segments) {
+                    Embedding embedding = embeddingModel.embed(segment).content();
+                    embeddingStore.add(embedding, segment);
+                }
+
+                processedCount++;
+                if (processedCount % 10 == 0) {
+                    logger.info("Verarbeitet: {} von {} Dokumenten", processedCount, documents.size());
+                }
+            } catch (Exception e) {
+                logger.error("Fehler beim Verarbeiten von Dokument {}: {}", doc.getId(), e.getMessage());
             }
         }
 
-        System.out.println("RAG-System für Job " + jobId + " initialisiert mit " + documents.size() + " Dokumenten");
+        logger.info("RAG-System für Job {} initialisiert mit {} Dokumenten", jobId, documents.size());
+    }
+
+    /**
+     * Prüft, ob der Qdrant-Server erreichbar ist
+     */
+    private boolean isQdrantReachable() {
+        try {
+            String url = String.format("http://%s:%d/collections", qdrantHost, qdrantPort);
+            Request request = new Request.Builder()
+                    .url(url)
+                    .get()
+                    .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                return response.isSuccessful();
+            }
+        } catch (Exception e) {
+            logger.error("Qdrant-Server nicht erreichbar: {}", e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -162,7 +298,7 @@ public class RAGService {
 
         // Index-Datei lesen
         if (!Files.exists(indexFilePath)) {
-            System.err.println("Index-Datei nicht gefunden: " + indexFilePath);
+            logger.error("Index-Datei nicht gefunden: {}", indexFilePath);
             return documents;
         }
 
@@ -171,7 +307,7 @@ public class RAGService {
         JsonNode urlsArray = rootNode.get("crawled_urls");
 
         if (urlsArray == null || !urlsArray.isArray()) {
-            System.err.println("Keine URLs in der Index-Datei gefunden");
+            logger.error("Keine URLs in der Index-Datei gefunden");
             return documents;
         }
 
@@ -181,7 +317,7 @@ public class RAGService {
             Path path = Paths.get(filePath);
 
             if (!Files.exists(path)) {
-                System.err.println("Datei nicht gefunden: " + filePath);
+                logger.warn("Datei nicht gefunden: {}", filePath);
                 continue;
             }
 
@@ -220,7 +356,7 @@ public class RAGService {
                 documents.add(ragDoc);
 
             } catch (Exception e) {
-                System.err.println("Fehler beim Lesen der Datei " + filePath + ": " + e.getMessage());
+                logger.error("Fehler beim Lesen der Datei {}: {}", filePath, e.getMessage());
             }
         }
 
@@ -234,43 +370,49 @@ public class RAGService {
         // Prüfen, ob das Embedding-Store initialisiert ist
         if (!embeddingStores.containsKey(jobId)) {
             try {
+                logger.info("Initialisiere Embedding-Store für Job {}...", jobId);
                 initializeEmbeddingStoreForJob(jobId);
             } catch (Exception e) {
-                System.err.println("Fehler beim Initialisieren des RAG-Systems: " + e.getMessage());
+                logger.error("Fehler beim Initialisieren des RAG-Systems: {}", e.getMessage());
                 return new ArrayList<>();
             }
         }
 
         EmbeddingStore<TextSegment> embeddingStore = embeddingStores.get(jobId);
 
-        // Query embedden
-        Embedding queryEmbedding = embeddingModel.embed(query).content();
+        try {
+            // Query embedden
+            Embedding queryEmbedding = embeddingModel.embed(query).content();
 
-        // Ähnliche Dokumente finden
-        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.findRelevant(queryEmbedding, maxResults);
+            // Ähnliche Dokumente finden
+            List<EmbeddingMatch<TextSegment>> matches = embeddingStore.findRelevant(queryEmbedding, maxResults);
 
-        // RAG-Dokumente aus dem Cache abrufen
-        List<RAGDocument> documents = documentCache.getOrDefault(jobId, new ArrayList<>());
+            // RAG-Dokumente aus dem Cache abrufen
+            List<RAGDocument> documents = documentCache.getOrDefault(jobId, new ArrayList<>());
 
-        // Relevante Dokumente anhand der URLs finden
-        List<RAGDocument> relevantDocs = new ArrayList<>();
-        for (EmbeddingMatch<TextSegment> match : matches) {
-            TextSegment segment = match.embedded();
-            String url = segment.metadata().get("url");
+            // Relevante Dokumente anhand der URLs finden
+            List<RAGDocument> relevantDocs = new ArrayList<>();
+            for (EmbeddingMatch<TextSegment> match : matches) {
+                TextSegment segment = match.embedded();
+                String url = segment.metadata().get("url");
 
-            // Passendes Dokument im Cache finden
-            for (RAGDocument doc : documents) {
-                if (doc.getUrl().equals(url)) {
-                    // Wenn nicht bereits in der Liste, hinzufügen
-                    if (!relevantDocs.contains(doc)) {
-                        relevantDocs.add(doc);
+                // Passendes Dokument im Cache finden
+                for (RAGDocument doc : documents) {
+                    if (doc.getUrl().equals(url)) {
+                        // Wenn nicht bereits in der Liste, hinzufügen
+                        if (!relevantDocs.contains(doc)) {
+                            relevantDocs.add(doc);
+                        }
+                        break;
                     }
-                    break;
                 }
             }
-        }
 
-        return relevantDocs;
+            return relevantDocs;
+        } catch (Exception e) {
+            logger.error("Fehler beim Suchen relevanter Dokumente: {}", e.getMessage());
+            return new ArrayList<>();
+        }
     }
 
     /**
@@ -290,13 +432,13 @@ public class RAGService {
             );
 
             // Antwort vom LLM generieren
-            return openAiChatModel.generate(prompt);
-
-
-            //return chatModel.generate(prompt);
+            logger.info("Generiere Antwort für Anfrage: '{}'", query);
+            String response = openAiChatModel.generate(prompt);
+            logger.info("Antwort generiert");
+            return response;
 
         } catch (Exception e) {
-            System.err.println("Fehler bei der Generierung der Antwort: " + e.getMessage());
+            logger.error("Fehler bei der Generierung der Antwort: {}", e.getMessage());
             return "Entschuldigung, es gab einen Fehler bei der Verarbeitung deiner Anfrage. Bitte versuche es später erneut.";
         }
     }
@@ -306,9 +448,10 @@ public class RAGService {
      */
     public void updateForNewCompletedJob(String jobId) {
         try {
+            logger.info("Aktualisiere RAG-System für neuen Job: {}", jobId);
             initializeEmbeddingStoreForJob(jobId);
         } catch (Exception e) {
-            System.err.println("Fehler beim Aktualisieren des RAG-Systems für neuen Job: " + e.getMessage());
+            logger.error("Fehler beim Aktualisieren des RAG-Systems für neuen Job: {}", e.getMessage());
         }
     }
 }
