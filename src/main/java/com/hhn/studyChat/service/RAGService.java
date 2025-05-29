@@ -17,11 +17,18 @@ import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
 import dev.langchain4j.data.document.Metadata;
 
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.QdrantGrpcClient;
+import io.qdrant.client.grpc.Collections;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
+import okhttp3.OkHttpClient;
+import okhttp3.MediaType;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,16 +38,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.annotation.PostConstruct;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.MediaType;
-import okhttp3.RequestBody;
 
 @Service
 public class RAGService {
@@ -51,13 +54,13 @@ public class RAGService {
     @Value("${qdrant.host:localhost}")
     private String qdrantHost;
 
-    @Value("${qdrant.port:6333}")
+    @Value("${qdrant.port:6334}")
     private int qdrantPort;
 
     @Value("${openai.api.key:your-api-key}")
     private String openaiApiKey;
 
-    @Value("${use.inmemory.store:true}")
+    @Value("${use.inmemory.store:false}")
     private boolean useInMemoryStore;
 
     // In-Memory-Cache für RAG-Dokumente nach jobId
@@ -77,6 +80,8 @@ public class RAGService {
     private static final int EMBEDDING_SIZE = 384; // Für AllMiniLmL6V2EmbeddingModel
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
+    private QdrantClient qdrantClient;
+
     @Autowired
     public RAGService(CrawlerService crawlerService) {
         this.crawlerService = crawlerService;
@@ -84,11 +89,22 @@ public class RAGService {
 
     @PostConstruct
     public void init() {
-        // Embedding-Modell initialisieren (lokales Modell)
+        logger.info("Starting Qdrant gRPC Client...");
+        try {
+            // Use the configured port consistently
+            qdrantClient = new QdrantClient(
+                    QdrantGrpcClient.newBuilder("localhost", 6334, false).build()
+            );
+            logger.info("Qdrant gRPC client initialized successfully on {}:{}", qdrantHost, qdrantPort);
+        } catch (Exception e) {
+            logger.error("Failed to initialize Qdrant gRPC client: {}", e.getMessage());
+            throw new RuntimeException("Cannot initialize Qdrant client", e);
+        }
+
+        // Rest of your initialization code...
         logger.info("Initialisiere Embedding-Modell...");
         embeddingModel = new AllMiniLmL6V2EmbeddingModel();
 
-        // Chat-Modell initialisieren
         logger.info("Initialisiere Chat-Modell...");
         openAiChatModel = OpenAiChatModel.builder()
                 .baseUrl("http://langchain4j.dev/demo/openai/v1")
@@ -96,7 +112,6 @@ public class RAGService {
                 .modelName("gpt-4o-mini")
                 .build();
 
-        // Initialisieren des RAG-Systems für alle abgeschlossenen Jobs
         logger.info("Initialisiere RAG-System für alle abgeschlossenen Jobs...");
         List<CrawlJob> completedJobs = crawlerService.getCompletedJobs();
         for (CrawlJob job : completedJobs) {
@@ -108,53 +123,96 @@ public class RAGService {
         }
     }
 
+    @PreDestroy
+    public void cleanup() {
+        if (qdrantClient != null) {
+            try {
+                qdrantClient.close();
+                logger.info("Qdrant gRPC client closed successfully");
+            } catch (Exception e) {
+                logger.error("Error closing Qdrant client: {}", e.getMessage());
+            }
+        }
+        if (httpClient != null) {
+            httpClient.connectionPool().evictAll();
+            httpClient.dispatcher().executorService().shutdown();
+        }
+    }
+
     /**
-     * Prüft, ob eine Qdrant-Collection existiert
+     * Prüft, ob eine Qdrant-Collection existiert (via gRPC)
      */
     private boolean collectionExists(String collectionName) {
         try {
-            String url = String.format("http://%s:%d/collections/%s", qdrantHost, qdrantPort, collectionName);
-            Request request = new Request.Builder()
-                    .url(url)
-                    .get()
-                    .build();
-
-            try (Response response = httpClient.newCall(request).execute()) {
-                return response.isSuccessful(); // 200 OK bedeutet, Collection existiert
-            }
-        } catch (Exception e) {
-            logger.error("Fehler beim Prüfen der Collection {}: {}", collectionName, e.getMessage());
+            Boolean exists = qdrantClient.collectionExistsAsync(collectionName).get();
+            logger.debug("Collection '{}' exists: {}", collectionName, exists);
+            return exists != null && exists;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("Thread interrupted while checking collection existence: {}", e.getMessage());
+            return false;
+        } catch (ExecutionException e) {
+            logger.error("gRPC-Fehler (collectionExists): {}", e.getMessage());
             return false;
         }
     }
 
     /**
-     * Erstellt eine neue Qdrant-Collection
+     * Erstellt eine neue Qdrant-Collection (via gRPC)
      */
-    private boolean createCollection(String collectionName) {
+    public boolean createCollection(String collectionName) {
         try {
-            String url = String.format("http://%s:%d/collections/%s", qdrantHost, qdrantPort, collectionName);
-
-            // JSON-Payload für die Collection-Erstellung
-            String json = String.format(
-                    "{\n" +
-                            "  \"vectors\": {\n" +
-                            "    \"size\": %d,\n" +
-                            "    \"distance\": \"Cosine\"\n" +
-                            "  }\n" +
-                            "}", EMBEDDING_SIZE);
-
-            RequestBody body = RequestBody.create(json, JSON);
-            Request request = new Request.Builder()
-                    .url(url)
-                    .put(body)
+            // Proper vector configuration for the collection
+            Collections.VectorParams vectorParams = Collections.VectorParams.newBuilder()
+                    .setSize(EMBEDDING_SIZE)
+                    .setDistance(Collections.Distance.Cosine)
                     .build();
 
-            try (Response response = httpClient.newCall(request).execute()) {
-                return response.isSuccessful();
-            }
+            Collections.VectorsConfig vectorsConfig = Collections.VectorsConfig.newBuilder()
+                    .setParams(vectorParams)
+                    .build();
+
+            Collections.CreateCollection createRequest = Collections.CreateCollection.newBuilder()
+                    .setCollectionName(collectionName)
+                    .setVectorsConfig(vectorsConfig)
+                    .build();
+
+            Collections.CollectionOperationResponse response = qdrantClient.createCollectionAsync(createRequest).get();
+            boolean success = response.getResult();
+            logger.info("Collection '{}' created successfully: {}", collectionName, success);
+            return success;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("Thread interrupted while creating collection: {}", e.getMessage());
+            return false;
+        } catch (ExecutionException e) {
+            logger.error("gRPC-Fehler (createCollection): {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Prüft, ob der Qdrant-Server erreichbar ist (via gRPC)
+     */
+    private boolean isQdrantReachable() {
+        try {
+            // Use gRPC health check instead of HTTP
+            io.qdrant.client.grpc.QdrantOuterClass.HealthCheckReply healthResponse =
+                    qdrantClient.healthCheckAsync().get();
+
+            // Check if we got a valid response (connection successful)
+            boolean isHealthy = healthResponse != null;
+            logger.debug("Qdrant health check successful: {}", isHealthy);
+            return isHealthy;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("Thread interrupted during health check: {}", e.getMessage());
+            return false;
+        } catch (ExecutionException e) {
+            logger.error("Qdrant gRPC health check failed: {}", e.getMessage());
+            return false;
         } catch (Exception e) {
-            logger.error("Fehler beim Erstellen der Collection {}: {}", collectionName, e.getMessage());
+            logger.error("Unexpected error during Qdrant health check: {}", e.getMessage());
             return false;
         }
     }
@@ -184,8 +242,8 @@ public class RAGService {
         } else {
             // Versuche Qdrant zu verwenden, mit Fallback zu In-Memory-Store
             try {
-                // Prüfe, ob Qdrant erreichbar ist
-                logger.info("Prüfe, ob Qdrant-Server erreichbar ist...");
+                // Prüfe, ob Qdrant erreichbar ist (via gRPC)
+                logger.info("Prüfe, ob Qdrant-Server via gRPC erreichbar ist...");
                 if (isQdrantReachable()) {
                     // Prüfe, ob Collection existiert
                     if (!collectionExists(collectionName)) {
@@ -201,17 +259,17 @@ public class RAGService {
 
                     // QdrantEmbeddingStore initialisieren
                     embeddingStore = QdrantEmbeddingStore.builder()
-                            .host(qdrantHost)
-                            .port(qdrantPort)
+                            .host("localhost")
+                            .port(6334)
                             .collectionName(collectionName)
                             .build();
 
-                    logger.info("Verbindung zu Qdrant (Port {}) erfolgreich", qdrantPort);
+                    logger.info("Verbindung zu Qdrant (gRPC Port {}) erfolgreich", qdrantPort);
                 } else {
-                    throw new IOException("Qdrant-Server nicht erreichbar");
+                    throw new IOException("Qdrant-Server nicht erreichbar via gRPC");
                 }
             } catch (Exception e) {
-                logger.error("Fehler bei der Verbindung zu Qdrant: {}", e.getMessage());
+                logger.error("Fehler bei der gRPC-Verbindung zu Qdrant: {}", e.getMessage());
                 logger.info("Verwende In-Memory-Store als Fallback");
                 embeddingStore = new InMemoryEmbeddingStore<>();
             }
@@ -266,26 +324,6 @@ public class RAGService {
         }
 
         logger.info("RAG-System für Job {} initialisiert mit {} Dokumenten", jobId, documents.size());
-    }
-
-    /**
-     * Prüft, ob der Qdrant-Server erreichbar ist
-     */
-    private boolean isQdrantReachable() {
-        try {
-            String url = String.format("http://%s:%d/collections", qdrantHost, qdrantPort);
-            Request request = new Request.Builder()
-                    .url(url)
-                    .get()
-                    .build();
-
-            try (Response response = httpClient.newCall(request).execute()) {
-                return response.isSuccessful();
-            }
-        } catch (Exception e) {
-            logger.error("Qdrant-Server nicht erreichbar: {}", e.getMessage());
-            return false;
-        }
     }
 
     /**
