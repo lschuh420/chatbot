@@ -9,6 +9,7 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Controller
 public class CrawlerController {
@@ -27,11 +28,27 @@ public class CrawlerController {
         return "index";
     }
 
+    /**
+     * Validate if output directory is safe.
+     * @param directory directory to check.
+     * @return true if the directory is valid else false.
+     */
+    private boolean isValidDirectory(String directory) {
+        // validate that directory only contains safe characters.
+        return directory.matches("^[a-zA-Z0-9._/-]+$");
+    }
+
     // API zum Erstellen eines neuen Jobs
     @PostMapping("/api/jobs")
-    public ResponseEntity<CrawlJob> createJob(@RequestParam("url") List<String> urls,
-                                              @RequestParam(value = "depth", defaultValue = "1") int depth,
-                                              @RequestParam(value = "outputDir", defaultValue = "./collected-content") String outputDir) {
+    public ResponseEntity<?> createJob(@RequestParam("url") List<String> urls,
+                                       @RequestParam(value = "depth", defaultValue = "1") int depth,
+                                       @RequestParam(value = "outputDir", defaultValue = "./collected-content") String outputDir) {
+        // validate output directory
+        if (!isValidDirectory(outputDir)) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Invalid output directory may contain illegal characters."));
+        }
+
         CrawlJob job = crawlerService.createJob(urls, depth, outputDir);
         return ResponseEntity.ok(job);
     }
