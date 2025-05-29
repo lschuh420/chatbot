@@ -1,0 +1,40 @@
+# URL Filter Rules für StudyChat Crawler
+# Format: [+/-][regex]
+# + = erlauben, - = verbieten
+# Erste passende Regel gewinnt
+
+# Erlaubte Domains (HHN und verwandte)
++^https?://([a-z0-9.-]*\.)?hs-heilbronn\.de/.*
++^https?://www\.heilbronn-university\.com/.*
+
+# Verbiete bestimmte Dateitypen
+-.*\.(css|js|ico|png|jpg|jpeg|gif|svg|webp|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|exe|dmg|iso|mp4|avi|mov|mp3|wav)(\?.*)?$
+
+# Verbiete bestimmte URL-Parameter
+-.*[\?&](lang|language)=.*
+-.*[\?&](print|popup|download)=.*
+-.*[\?&]utm_.*=.*
+
+# Verbiete interne Links und Fragmente
+-.*#.*
+-.*javascript:.*
+-.*mailto:.*
+-.*tel:.*
+-.*ftp:.*
+
+# Verbiete bestimmte Pfade
+-.*/(wp-admin|admin|login|logout|register)/.*
+-.*/(api|rest|json|xml|rss)/.*
+-.*/(assets|static|css|js|images|img|fonts)/.*
+
+# Verbiete sehr tiefe Pfade (mehr als 6 Segmente)
+-^https?://[^/]+(/[^/]+){7,}.*
+
+# Verbiete URLs mit vielen Query-Parametern
+-.*\?([^&]*&){5,}.*
+
+# Erlaube alles andere von erlaubten Domains
++^https?://([a-z0-9.-]*\.)?hs-heilbronn\.de/.*
+
+# Verbiete alle anderen Domains
+-.*

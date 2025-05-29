@@ -1,12 +1,15 @@
 package com.hhn.studyChat;
 
 import com.digitalpebble.stormcrawler.ConfigurableTopology;
+import com.digitalpebble.stormcrawler.Constants;
 import com.digitalpebble.stormcrawler.bolt.*;
 import com.digitalpebble.stormcrawler.spout.MemorySpout;
 import com.digitalpebble.stormcrawler.tika.ParserBolt;
 import com.digitalpebble.stormcrawler.tika.RedirectionBolt;
 import com.hhn.studyChat.util.bolt.HHNStructuredDataBolt;
 import com.hhn.studyChat.util.bolt.RAGJSONFileWriterBolt;
+import com.hhn.studyChat.util.bolt.DepthControlBolt;
+import com.hhn.studyChat.util.bolt.URLExtractorBolt;
 import org.apache.storm.topology.TopologyBuilder;
 import org.apache.storm.tuple.Fields;
 
@@ -16,13 +19,13 @@ import java.io.InputStream;
 import java.io.File;
 
 /**
- * Topologie für Web-Crawling
+ * Stabile Topologie für Web-Crawling
+ * Verwendet Standard StormCrawler Komponenten für maximale Kompatibilität
  */
 public class CrawlTopology extends ConfigurableTopology {
 
 	private final String[] seedUrls;
 
-	// Standardkonstruktor für die CLI-Ausführung
 	public CrawlTopology() {
 		this(new String[]{"https://www.hs-heilbronn.de/de"});
 	}
@@ -37,24 +40,14 @@ public class CrawlTopology extends ConfigurableTopology {
 
 	@Override
 	protected int run(String[] args) {
-		// Die von der Elternklasse geerbte Konfiguration verwenden
-
-		// Konfiguration aus der Eigenschaftsdatei laden
 		loadCustomConfiguration();
-
-		// Topologie erstellen und einreichen
 		return submit("crawl", conf, createTopology());
 	}
 
-	/**
-	 * Lädt benutzerdefinierte Konfigurationen aus einer Properties-Datei
-	 */
 	private void loadCustomConfiguration() {
 		try {
-			// Zuerst versuchen, die Datei im Ressourcenverzeichnis zu finden
 			InputStream is = getClass().getClassLoader().getResourceAsStream("crawler-config.properties");
 
-			// Wenn nicht als Ressource verfügbar, als Datei im aktuellen Verzeichnis suchen
 			if (is == null) {
 				File file = new File("crawler-config.properties");
 				if (file.exists()) {
@@ -62,12 +55,10 @@ public class CrawlTopology extends ConfigurableTopology {
 				}
 			}
 
-			// Wenn eine Konfigurationsdatei gefunden wurde, laden
 			if (is != null) {
 				Properties props = new Properties();
 				props.load(is);
 
-				// Alle Properties in die Storm-Konfiguration übertragen
 				for (String key : props.stringPropertyNames()) {
 					conf.put(key, props.getProperty(key));
 				}
@@ -76,13 +67,11 @@ public class CrawlTopology extends ConfigurableTopology {
 				System.out.println("Crawler-Konfiguration erfolgreich geladen.");
 			} else {
 				System.err.println("WARNUNG: crawler-config.properties nicht gefunden. Verwende Standardkonfiguration.");
-				// Mindestens den HTTP-Agent setzen, um den Fehler zu vermeiden
 				conf.put("http.agent.name", "StudyChat-Bot/1.0");
 			}
 		} catch (Exception e) {
 			System.err.println("Fehler beim Laden der Crawler-Konfiguration: " + e.getMessage());
 			e.printStackTrace();
-			// Mindestens den HTTP-Agent setzen, um den Fehler zu vermeiden
 			conf.put("http.agent.name", "StudyChat-Bot/1.0");
 		}
 	}
@@ -90,28 +79,75 @@ public class CrawlTopology extends ConfigurableTopology {
 	public TopologyBuilder createTopology() {
 		TopologyBuilder builder = new TopologyBuilder();
 
-		// Verwende die seedUrls-Instanzvariable
-		builder.setSpout("spout", new MemorySpout(seedUrls));
+		System.out.println("=== Building Crawl Topology ===");
 
-		builder.setBolt("partitioner", new URLPartitionerBolt()).shuffleGrouping("spout");
+		// 1. SPOUT: Startet mit Seed-URLs
+		builder.setSpout("spout", new MemorySpout(seedUrls), 1);
+		System.out.println("✓ Spout configured with " + seedUrls.length + " seed URLs");
 
-		builder.setBolt("fetch", new FetcherBolt()).fieldsGrouping("partitioner", new Fields("key"));
+		// 2. URL PARTITIONER: Verteilt URLs nach Host
+		builder.setBolt("partitioner", new URLPartitionerBolt(), 1)
+				.shuffleGrouping("spout")
+				.shuffleGrouping("urlextractor"); // Empfängt neue URLs direkt vom URL-Extractor
+		System.out.println("✓ URL Partitioner configured");
 
-		builder.setBolt("sitemap", new SiteMapParserBolt()).localOrShuffleGrouping("fetch");
+		// 3. FETCHER: Lädt Webseiten herunter
+		builder.setBolt("fetch", new FetcherBolt(), 1)
+				.fieldsGrouping("partitioner", new Fields("key"));
+		System.out.println("✓ Fetcher configured");
 
-		builder.setBolt("feeds", new FeedParserBolt()).localOrShuffleGrouping("sitemap");
+		// 4. SITEMAP PARSER: Verarbeitet Sitemaps
+		builder.setBolt("sitemap", new SiteMapParserBolt(), 1)
+				.localOrShuffleGrouping("fetch");
 
-		builder.setBolt("parse", new JSoupParserBolt()).localOrShuffleGrouping("feeds");
+		// 5. FEED PARSER: Verarbeitet RSS/Atom Feeds
+		builder.setBolt("feeds", new FeedParserBolt(), 1)
+				.localOrShuffleGrouping("sitemap");
 
-		builder.setBolt("shunt", new RedirectionBolt()).localOrShuffleGrouping("parse");
+		// 6. HTML PARSER: Extrahiert Text und Links
+		// WICHTIG: parser.emitOutlinks muss auf true sein für Rekursion!
+		builder.setBolt("parse", new JSoupParserBolt(), 1)
+				.localOrShuffleGrouping("feeds");
+		System.out.println("✓ Parser chain configured");
 
-		builder.setBolt("tika", new ParserBolt()).localOrShuffleGrouping("shunt", "tika");
+		// 7. REDIRECTION HANDLER: Behandelt Weiterleitungen
+		builder.setBolt("shunt", new RedirectionBolt(), 1)
+				.localOrShuffleGrouping("parse");
 
-		builder.setBolt("hhnstructured", new HHNStructuredDataBolt()).localOrShuffleGrouping("parse");
+		// 8. TIKA PARSER: Verarbeitet Nicht-HTML-Dokumente
+		builder.setBolt("tika", new ParserBolt(), 1)
+				.localOrShuffleGrouping("shunt", "tika");
 
-		builder.setBolt("ragjson", new RAGJSONFileWriterBolt("./collected-content")).localOrShuffleGrouping("hhnstructured");
+		// === REKURSIVE URL-VERARBEITUNG ===
 
-		// TopologyBuilder.createTopology() gibt bereits einen StormTopology zurück
+		// 9. URL EXTRACTOR mit DEPTH CONTROL: Kombinierter Bolt
+		// Extrahiert URLs UND kontrolliert Tiefe UND filtert URLs in einem Schritt
+		builder.setBolt("urlextractor", new URLExtractorBolt(), 1)
+				.localOrShuffleGrouping("parse")
+				.localOrShuffleGrouping("tika");
+		System.out.println("✓ URL Extractor with integrated Depth Control and Filtering configured");
+
+		// === DATENEXTRAKTION ===
+
+		// 11. HHN STRUCTURED DATA: Extrahiert strukturierte Daten
+		builder.setBolt("hhnstructured", new HHNStructuredDataBolt(), 1)
+				.localOrShuffleGrouping("parse")
+				.localOrShuffleGrouping("tika");
+		System.out.println("✓ HHN Structured Data Extractor configured");
+
+		// 12. JSON WRITER: Schreibt Ergebnisse in JSON-Dateien
+		builder.setBolt("ragjson", new RAGJSONFileWriterBolt("./collected-content"), 1)
+				.localOrShuffleGrouping("hhnstructured");
+		System.out.println("✓ JSON Writer configured");
+
+		System.out.println("=== Topology Complete ===");
+		System.out.println("Data Flow:");
+		System.out.println("  Spout → Partitioner → Fetch → Parse → URLExtractor");
+		System.out.println("            ↑                             ↓");
+		System.out.println("            └─── New URLs (filtered) ←────┘");
+		System.out.println("  Parse → HHNStructured → JSONWriter");
+		System.out.println("========================================");
+
 		return builder;
 	}
 }
