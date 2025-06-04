@@ -1,46 +1,51 @@
-# syntax=docker/dockerfile:1
-FROM eclipse-temurin:17-jdk-alpine AS build
-
-# Install Maven
-RUN apk add --no-cache maven
+FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /app
 
-# Copy build config first for cache
-COPY pom.xml .
+# Copy pom files
+COPY pom-docker.xml pom.xml
+
+# Download dependencies
 RUN mvn dependency:go-offline -B
 
-# Copy source
+# Copy source code
 COPY src ./src
 
-# Optional: enforce UTF-8 encoding of YAML/properties
-RUN find src/main/resources -name "*.yml" -exec sed -i 's/\r//' {} \;
+# Copy the Docker-specific YAML config
+COPY application-docker.yml src/main/resources/
 
-# Build JAR
-RUN mvn clean package -DskipTests -Dfile.encoding=UTF-8
+# Build the application
+RUN mvn clean package -DskipTests -Pdocker
 
-# Runtime
-FROM eclipse-temurin:17-jre-alpine
+# Production stage
+FROM eclipse-temurin:17-jre
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install curl for health checks
-RUN apk add --no-cache curl
+# Create directories
+RUN mkdir -p /app/collected-content /app/logs
 
-# Create non-root user
-RUN addgroup -S studychat && adduser -S studychat -G studychat
+# Copy the jar file from builder stage
+COPY --from=builder /app/target/*.jar app.jar
 
-# Copy JAR
-COPY --from=build /app/target/studyChat-0.0.1-SNAPSHOT.jar app.jar
+# Create a non-root user
+RUN addgroup --system spring && adduser --system spring --ingroup spring
+RUN chown -R spring:spring /app
+USER spring
 
-# Prepare logs directory
-RUN mkdir -p /app/logs && chown -R studychat:studychat /app
-
-USER studychat
-
+# Expose port
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Environment variables
+ENV JAVA_OPTS="-Xmx2g -Xms1g"
+ENV SPRING_PROFILES_ACTIVE=docker
+
+# Run the application
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

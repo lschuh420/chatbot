@@ -1,35 +1,48 @@
-version: '3.8'
-
 services:
-  study-chat:
-    build: .
-    container_name: study-chat-app
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./collected-content:/app/collected-content
-    depends_on:
-      - qdrant
-    environment:
-      QDRANT_URL: http://qdrant:6334
-      SPRING_PROFILES_ACTIVE: docker
-    networks:
-      - study-net
-
   qdrant:
-    image: qdrant/qdrant
-    container_name: qdrant-db
+    image: qdrant/qdrant:latest
+    container_name: studychat-qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API
     volumes:
       - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
     networks:
-      - study-net
+      - studychat-network
+    restart: unless-stopped
+
+  studychat-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: studychat-app
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-demo}
+      - JAVA_OPTS=-Xmx2g -Xms1g
+    # Simple dependency without health check
+    depends_on:
+      - qdrant
+    volumes:
+      - ./collected-content:/app/collected-content
+      - app_logs:/app/logs
+    networks:
+      - studychat-network
+    restart: unless-stopped
 
 volumes:
   qdrant_data:
+    driver: local
+  app_logs:
+    driver: local
 
 networks:
-  study-net:
+  studychat-network:
     driver: bridge
