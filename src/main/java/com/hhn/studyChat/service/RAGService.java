@@ -51,17 +51,30 @@ public class RAGService {
 
     private final CrawlerService crawlerService;
 
-    @Value("${qdrant.host:localhost}")
+    @Value("${qdrant.host}")
     private String qdrantHost;
 
-    @Value("${qdrant.port:6334}")
+    @Value("${qdrant.port}")
     private int qdrantPort;
 
-    @Value("${openai.api.key:your-api-key}")
+    @Value("${openai.api.key}")
     private String openaiApiKey;
 
-    @Value("${use.inmemory.store:false}")
+    @Value("${use.inmemory.store}")
     private boolean useInMemoryStore;
+
+    @Value("${openai.model}")
+    private String openAIModel;
+
+    // Konstanten
+    @Value("${langchain.chunk-size}")
+    private int CHUNK_SIZE;
+
+    @Value("${langchain.chunk-overlap}")
+    private int CHUNK_OVERLAP;
+
+    @Value("${langchain.embedding-size}")
+    private int EMBEDDING_SIZE; // Für AllMiniLmL6V2EmbeddingModel
 
     // In-Memory-Cache für RAG-Dokumente nach jobId
     private final Map<String, List<RAGDocument>> documentCache = new ConcurrentHashMap<>();
@@ -74,10 +87,7 @@ public class RAGService {
     private final OkHttpClient httpClient = new OkHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // Konstanten
-    private static final int CHUNK_SIZE = 500;
-    private static final int CHUNK_OVERLAP = 50;
-    private static final int EMBEDDING_SIZE = 384; // Für AllMiniLmL6V2EmbeddingModel
+
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     private QdrantClient qdrantClient;
@@ -108,8 +118,8 @@ public class RAGService {
         logger.info("Initialisiere Chat-Modell...");
         openAiChatModel = OpenAiChatModel.builder()
                 .baseUrl("http://langchain4j.dev/demo/openai/v1")
-                .apiKey("demo")
-                .modelName("gpt-4o-mini")
+                .apiKey(openaiApiKey)
+                .modelName(openAIModel)
                 .build();
 
         logger.info("Initialisiere RAG-System für alle abgeschlossenen Jobs...");

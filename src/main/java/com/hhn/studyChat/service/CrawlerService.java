@@ -5,12 +5,13 @@ import com.hhn.studyChat.util.TopologyRunner;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import lombok.Setter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,16 +36,13 @@ public class CrawlerService {
     private final Map<String, CrawlJob> jobs = new ConcurrentHashMap<>();
     private final ExecutorService executorService = Executors.newFixedThreadPool(2);
 
-    @Value("${crawler.output.dir:./collected-content}")
+    @Value("${crawler.output.dir}")
     private String defaultOutputDir;
 
-    // Optional: Dependency Injection für RAGService
-    private RAGService ragService;
-
     // Setter für RAGService (vermeidet zirkuläre Abhängigkeit)
-    public void setRagService(RAGService ragService) {
-        this.ragService = ragService;
-    }
+    // Optional: Dependency Injection für RAGService
+    @Setter
+    private RAGService ragService;
 
     @PostConstruct
     public void init() {

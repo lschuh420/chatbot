@@ -1,0 +1,51 @@
+server:
+  port: 8080
+
+spring:
+  thymeleaf:
+    cache: false
+    enabled: true
+    prefix: classpath:/templates/
+    suffix: .html
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+logging:
+  level:
+    root: INFO
+    com.hhn.studyChat: DEBUG
+    org.springframework.web: INFO
+
+crawler:
+  output:
+    dir: ./collected-content
+  max:
+    threads: 2
+
+http:
+  agent:
+    name: StudyChat-Bot
+    version: 1.0
+    description: StudyChat Crawler für Hochschule Heilbronn
+    url: https://www.hs-heilbronn.de
+    email: contact@example.com
+
+qdrant:
+  host: localhost
+  port: 6334
+
+openai:
+  api:
+    key: demo
+  model: gpt-4o-mini
+
+use:
+  inmemory:
+    store: false
+
+langchain:
+  chunk-size: 500
+  chunk-overlap: 50
+  embedding-size: 384
