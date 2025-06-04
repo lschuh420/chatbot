@@ -130,10 +130,15 @@
                         <div class="form-text">Wie tief soll der Crawler in die Website vordringen? (1-5)</div>
                     </div>
                     <div class="mb-3">
-                        <label for="outputDir" class="form-label">
+                        <label for="directorySelector" class="form-label">
                             <i class="bi bi-folder me-1"></i>Ausgabeverzeichnis
                         </label>
-                        <input type="text" class="form-control" id="outputDir" value="./collected-content">
+                        <input type="file" id="directorySelector" webkitdirectory directory multiple class="form-control">
+                        <input type="hidden" id="outputDir" name="outputDir" value="./collected-content">
+                        <div id="selectedDirectoryDisplay" class="mt-2 text-muted">
+                            <i class="bi bi-check-circle-fill me-1"></i>Ausgewähltes Verzeichnis: ./collected-content
+                        </div>
+                        <div class="form-text">Wähle ein Verzeichnis aus, wo die Crawler-Daten gespeichert werden sollen.</div>
                     </div>
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-play-fill me-1"></i>Job erstellen
@@ -230,7 +235,14 @@
                 'outputDir': outputDir
             })
         })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Fehler beim Erstellen des Jobs');
+                    });
+                }
+                return response.json();
+            })
             .then(job => {
                 // Button zurücksetzen
                 submitButton.disabled = false;
@@ -249,7 +261,7 @@
                 submitButton.innerHTML = originalButtonText;
 
                 console.error('Error:', error);
-                alert('Fehler beim Erstellen des Jobs');
+                alert(error.message || 'Fehler beim Erstellen des Jobs');
             });
     });
 
@@ -395,6 +407,29 @@
                 refreshButton.disabled = false;
             });
     }
+</script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const directorySelector = document.getElementById('directorySelector');
+        const outputDir = document.getElementById('outputDir');
+        const selectedDirectoryDisplay = document.getElementById('selectedDirectoryDisplay');
+
+        directorySelector.addEventListener('change', function(event) {
+            // get selected directory
+            const files = event.target.files;
+            if (files.length > 0) {
+                // get path
+                const path = files[0].webkitRelativePath.split('/')[0];
+                console.log('Selected directory:', path);
+
+                // update hidden field with path
+                outputDir.value = path;
+
+                // show selected directory
+                selectedDirectoryDisplay.innerHTML = '<i class="bi bi-check-circle-fill text-success me-1"></i>Ausgewähltes Verzeichnis: ' + path;
+            }
+        });
+    });
 </script>
 </body>
 </html>
