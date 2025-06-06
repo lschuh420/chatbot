@@ -233,6 +233,9 @@ public class CrawlerService {
                 );
 
                 // Nach erfolgreichem Abschluss
+                int crawledCount = countCrawledUrls(job.getOutputDirectory());
+                job.setCrawledUrlsCount(crawledCount);
+
                 job.setStatus("COMPLETED");
                 job.setCompletedAt(LocalDateTime.now());
 
@@ -270,11 +273,31 @@ public class CrawlerService {
                 .collect(Collectors.toList());
     }
 
-    // Aktualisiere Job-Statistiken
-    public void updateJobStats(String jobId, int crawledUrlsCount) {
-        CrawlJob job = jobs.get(jobId);
-        if (job != null) {
-            job.setCrawledUrlsCount(crawledUrlsCount);
+    /**
+     * Ermittelt die Anzahl der gecrawlten URLs aus dem Output-Verzeichnis
+     */
+    private int countCrawledUrls(String outputDirectory) {
+        try {
+            Path indexFilePath = Paths.get(outputDirectory, "crawl_index.json");
+
+            if (!Files.exists(indexFilePath)) {
+                logger.warn("Index-Datei nicht gefunden: {}", indexFilePath);
+                return 0;
+            }
+
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode rootNode = mapper.readTree(indexFilePath.toFile());
+            JsonNode urlsArray = rootNode.get("crawled_urls");
+
+            if (urlsArray != null && urlsArray.isArray()) {
+                int count = urlsArray.size();
+                logger.info("Gefunden: {} gecrawlte URLs in {}", count, indexFilePath);
+                return count;
+            }
+        } catch (IOException e) {
+            logger.error("Fehler beim Zählen der gecrawlten URLs", e);
         }
+
+        return 0;
     }
 }

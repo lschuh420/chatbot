@@ -122,12 +122,22 @@
                         <textarea class="form-control" id="urls" rows="3" required
                                   placeholder="https://www.example.com"></textarea>
                     </div>
-                    <div class="mb-3">
-                        <label for="depth" class="form-label">
+
+                    <div id="crawlDepthGroup" class="mb-3">
+                        <label for="depth" class="form-label" id="crawlDepthLabel">
                             <i class="bi bi-layers me-1"></i>Crawl-Tiefe
                         </label>
-                        <input type="number" class="form-control" id="depth" value="1" min="1" max="5">
-                        <div class="form-text">Wie tief soll der Crawler in die Website vordringen? (1-5)</div>
+                        <input type="number" class="form-control" id="depth" value="1" min="0" max="3">
+                        <div class="form-text" id="crawlDepthHelp">
+                            Wie tief soll der Crawler in die Website vordringen? (0-3)
+                        </div>
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="sitemapCheck">
+                        <label class="form-check-label" for="sitemapCheck">
+                            <i class="bi bi-file-earmark-text me-1"></i>Sitemap crawlen [bisher nur html, keine Funktionalität]
+                        </label>
                     </div>
                     <div class="mb-3">
                         <label for="outputDir" class="form-label">
@@ -395,6 +405,35 @@
                 refreshButton.disabled = false;
             });
     }
+
+    // 1. Elemente für checkbox logik aus DOM holen
+    const sitemapCheck = document.getElementById('sitemapCheck');
+    const depthInput   = document.getElementById('depth');
+    const depthLabel   = document.getElementById('crawlDepthLabel');
+    const depthHelp    = document.getElementById('crawlDepthHelp');
+
+    // 2. Funktion: Crawl-Tiefe aktivieren/deaktivieren
+    function toggleCrawlDepth() {
+        if (sitemapCheck.checked) {
+            // Checkbox ist gesetzt → Crawl-Tiefe ausgrauen und deaktivieren
+            depthInput.disabled = true;
+            depthLabel.classList.add('text-muted');
+            depthHelp.classList.add('text-muted');
+        } else {
+            // Checkbox ist nicht gesetzt → Crawl-Tiefe wieder aktivieren
+            depthInput.disabled = false;
+            depthLabel.classList.remove('text-muted');
+            depthHelp.classList.remove('text-muted');
+        }
+    }
+
+    // 3. Event-Listener an die Checkbox hängen
+    sitemapCheck.addEventListener('change', toggleCrawlDepth);
+
+    // 4. Beim Laden der Seite initial prüfen (falls man z.B. mit devtools vorher gesetzt hat)
+    window.addEventListener('DOMContentLoaded', () => {
+        toggleCrawlDepth();
+    });
 </script>
 </body>
 </html>
