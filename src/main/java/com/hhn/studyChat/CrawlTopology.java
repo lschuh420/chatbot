@@ -19,8 +19,8 @@ import java.io.InputStream;
 import java.io.File;
 
 /**
- * Stabile Topologie für Web-Crawling
- * Verwendet Standard StormCrawler Komponenten für maximale Kompatibilität
+ * Erweiterte Topologie für Web-Crawling mit Sitemap-Unterstützung
+ * Kann zwischen normalem Crawling und Sitemap-Crawling umschalten
  */
 public class CrawlTopology extends ConfigurableTopology {
 
@@ -79,17 +79,35 @@ public class CrawlTopology extends ConfigurableTopology {
 	public TopologyBuilder createTopology() {
 		TopologyBuilder builder = new TopologyBuilder();
 
+		// NEU: Prüfe, ob Sitemap-Crawling aktiviert ist
+		boolean sitemapCrawlEnabled = false;
+		try {
+			Object sitemapEnabled = conf.get("sitemap.crawl.enabled");
+			sitemapCrawlEnabled = sitemapEnabled != null && Boolean.parseBoolean(sitemapEnabled.toString());
+		} catch (Exception e) {
+			System.err.println("Fehler beim Lesen der Sitemap-Konfiguration: " + e.getMessage());
+		}
+
 		System.out.println("=== Building Crawl Topology ===");
+		System.out.println("Sitemap Crawling: " + (sitemapCrawlEnabled ? "ENABLED" : "DISABLED"));
 
 		// 1. SPOUT: Startet mit Seed-URLs
 		builder.setSpout("spout", new MemorySpout(seedUrls), 1);
 		System.out.println("✓ Spout configured with " + seedUrls.length + " seed URLs");
 
 		// 2. URL PARTITIONER: Verteilt URLs nach Host
-		builder.setBolt("partitioner", new URLPartitionerBolt(), 1)
-				.shuffleGrouping("spout")
-				.shuffleGrouping("urlextractor"); // Empfängt neue URLs direkt vom URL-Extractor
-		System.out.println("✓ URL Partitioner configured");
+		if (sitemapCrawlEnabled) {
+			// Bei Sitemap-Crawling: Nur vom Spout empfangen, keine rekursiven URLs
+			builder.setBolt("partitioner", new URLPartitionerBolt(), 1)
+					.shuffleGrouping("spout");
+			System.out.println("✓ URL Partitioner configured (Sitemap mode - no recursive URLs)");
+		} else {
+			// Normaler Modus: Rekursive URLs vom URL-Extractor empfangen
+			builder.setBolt("partitioner", new URLPartitionerBolt(), 1)
+					.shuffleGrouping("spout")
+					.shuffleGrouping("urlextractor");
+			System.out.println("✓ URL Partitioner configured (Normal mode - recursive URLs enabled)");
+		}
 
 		// 3. FETCHER: Lädt Webseiten herunter
 		builder.setBolt("fetch", new FetcherBolt(), 1)
@@ -97,15 +115,16 @@ public class CrawlTopology extends ConfigurableTopology {
 		System.out.println("✓ Fetcher configured");
 
 		// 4. SITEMAP PARSER: Verarbeitet Sitemaps
+		// WICHTIG: Bei Sitemap-Crawling wird dieser Bolt zum Hauptpunkt für URL-Extraktion
 		builder.setBolt("sitemap", new SiteMapParserBolt(), 1)
 				.localOrShuffleGrouping("fetch");
+		System.out.println("✓ Sitemap Parser configured");
 
 		// 5. FEED PARSER: Verarbeitet RSS/Atom Feeds
 		builder.setBolt("feeds", new FeedParserBolt(), 1)
 				.localOrShuffleGrouping("sitemap");
 
 		// 6. HTML PARSER: Extrahiert Text und Links
-		// WICHTIG: parser.emitOutlinks muss auf true sein für Rekursion!
 		builder.setBolt("parse", new JSoupParserBolt(), 1)
 				.localOrShuffleGrouping("feeds");
 		System.out.println("✓ Parser chain configured");
@@ -118,34 +137,45 @@ public class CrawlTopology extends ConfigurableTopology {
 		builder.setBolt("tika", new ParserBolt(), 1)
 				.localOrShuffleGrouping("shunt", "tika");
 
-		// === REKURSIVE URL-VERARBEITUNG ===
-
-		// 9. URL EXTRACTOR mit DEPTH CONTROL: Kombinierter Bolt
-		// Extrahiert URLs UND kontrolliert Tiefe UND filtert URLs in einem Schritt
-		builder.setBolt("urlextractor", new URLExtractorBolt(), 1)
-				.localOrShuffleGrouping("parse")
-				.localOrShuffleGrouping("tika");
-		System.out.println("✓ URL Extractor with integrated Depth Control and Filtering configured");
+		// === REKURSIVE URL-VERARBEITUNG (nur bei normalem Crawling) ===
+		if (!sitemapCrawlEnabled) {
+			// 9. URL EXTRACTOR mit DEPTH CONTROL: Kombinierter Bolt
+			// Extrahiert URLs UND kontrolliert Tiefe UND filtert URLs in einem Schritt
+			builder.setBolt("urlextractor", new URLExtractorBolt(), 1)
+					.localOrShuffleGrouping("parse")
+					.localOrShuffleGrouping("tika");
+			System.out.println("✓ URL Extractor with integrated Depth Control and Filtering configured (Normal mode)");
+		} else {
+			System.out.println("✓ URL Extractor DISABLED (Sitemap mode - URLs come from sitemap parser)");
+		}
 
 		// === DATENEXTRAKTION ===
 
-		// 11. HHN STRUCTURED DATA: Extrahiert strukturierte Daten
+		// 10. HHN STRUCTURED DATA: Extrahiert strukturierte Daten
 		builder.setBolt("hhnstructured", new HHNStructuredDataBolt(), 1)
 				.localOrShuffleGrouping("parse")
 				.localOrShuffleGrouping("tika");
 		System.out.println("✓ HHN Structured Data Extractor configured");
 
-		// 12. JSON WRITER: Schreibt Ergebnisse in JSON-Dateien
+		// 11. JSON WRITER: Schreibt Ergebnisse in JSON-Dateien
 		builder.setBolt("ragjson", new RAGJSONFileWriterBolt("./collected-content"), 1)
 				.localOrShuffleGrouping("hhnstructured");
 		System.out.println("✓ JSON Writer configured");
 
 		System.out.println("=== Topology Complete ===");
-		System.out.println("Data Flow:");
-		System.out.println("  Spout → Partitioner → Fetch → Parse → URLExtractor");
-		System.out.println("            ↑                             ↓");
-		System.out.println("            └─── New URLs (filtered) ←────┘");
-		System.out.println("  Parse → HHNStructured → JSONWriter");
+		if (sitemapCrawlEnabled) {
+			System.out.println("SITEMAP MODE Data Flow:");
+			System.out.println("  Spout → Partitioner → Fetch → SitemapParser");
+			System.out.println("            ↑                        ↓");
+			System.out.println("            └─── New Sitemap URLs ←──┘");
+			System.out.println("  SitemapParser → Parse → HHNStructured → JSONWriter");
+		} else {
+			System.out.println("NORMAL MODE Data Flow:");
+			System.out.println("  Spout → Partitioner → Fetch → Parse → URLExtractor");
+			System.out.println("            ↑                             ↓");
+			System.out.println("            └─── New URLs (filtered) ←────┘");
+			System.out.println("  Parse → HHNStructured → JSONWriter");
+		}
 		System.out.println("========================================");
 
 		return builder;

@@ -1,0 +1,27 @@
+2025-06-19 21:57:14 [SpringApplicationShutdownHook] INFO  org.springframework.boot.web.embedded.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2025-06-19 21:57:14 [tomcat-shutdown] INFO  org.springframework.boot.web.embedded.tomcat.GracefulShutdown - Graceful shutdown complete
+2025-06-19 21:57:25 [main] INFO  com.hhn.studyChat.StudyChatApplication - Starting StudyChatApplication using Java 17.0.15 with PID 33680 (C:\dev\swlab\repository_v1.0\target\classes started by Robin in C:\dev\swlab\repository_v1.0)
+2025-06-19 21:57:25 [main] DEBUG com.hhn.studyChat.StudyChatApplication - Running with Spring Boot v3.4.5, Spring v6.2.6
+2025-06-19 21:57:25 [main] INFO  com.hhn.studyChat.StudyChatApplication - No active profile set, falling back to 1 default profile: "default"
+2025-06-19 21:57:25 [main] INFO  org.springframework.boot.web.embedded.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2025-06-19 21:57:25 [main] INFO  org.apache.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2025-06-19 21:57:25 [main] INFO  org.apache.catalina.core.StandardService - Starting service [Tomcat]
+2025-06-19 21:57:25 [main] INFO  org.apache.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.40]
+2025-06-19 21:57:25 [main] INFO  org.apache.catalina.core.ContainerBase.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2025-06-19 21:57:25 [main] INFO  org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 709 ms
+2025-06-19 21:57:25 [main] INFO  com.hhn.studyChat.service.CrawlerService - Output directory does not exist yet: .\collected-content
+2025-06-19 21:57:26 [main] INFO  com.hhn.studyChat.service.RAGService - Initialisiere Embedding-Modell...
+2025-06-19 21:57:27 [main] INFO  com.hhn.studyChat.service.RAGService - Initialisiere Chat-Modell...
+2025-06-19 21:57:27 [main] INFO  com.hhn.studyChat.service.RAGService - Initialisiere RAG-System für alle abgeschlossenen Jobs...
+2025-06-19 21:57:27 [main] INFO  com.hhn.studyChat.service.RAGService - Initialisiere Embedding-Modell...
+2025-06-19 21:57:27 [main] INFO  com.hhn.studyChat.service.RAGService - Initialisiere Chat-Modell...
+2025-06-19 21:57:27 [main] INFO  com.hhn.studyChat.service.RAGService - Initialisiere RAG-System für alle abgeschlossenen Jobs...
+2025-06-19 21:57:27 [main] INFO  org.springframework.boot.autoconfigure.web.servlet.WelcomePageHandlerMapping - Adding welcome page template: index
+2025-06-19 21:57:27 [main] INFO  org.apache.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2025-06-19 21:57:27 [main] INFO  org.springframework.boot.web.embedded.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2025-06-19 21:57:27 [main] INFO  com.hhn.studyChat.StudyChatApplication - Started StudyChatApplication in 3.007 seconds (process running for 3.883)
+2025-06-19 21:57:34 [http-nio-8080-exec-1] INFO  org.apache.catalina.core.ContainerBase.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2025-06-19 21:57:34 [http-nio-8080-exec-1] INFO  org.springframework.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2025-06-19 21:57:34 [http-nio-8080-exec-1] INFO  org.springframework.web.servlet.DispatcherServlet - Completed initialization in 0 ms
+2025-06-19 21:57:49 [SpringApplicationShutdownHook] INFO  org.springframework.boot.web.embedded.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2025-06-19 21:57:49 [tomcat-shutdown] INFO  org.springframework.boot.web.embedded.tomcat.GracefulShutdown - Graceful shutdown complete

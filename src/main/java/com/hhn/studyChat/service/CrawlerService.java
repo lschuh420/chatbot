@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -113,6 +112,7 @@ public class CrawlerService {
                                     .id(jobId)
                                     .seedUrls(seedUrls)
                                     .maxDepth(1) // Annahme
+                                    .sitemapCrawl(false) // NEU: Standard-Wert für bestehende Jobs
                                     .status("COMPLETED")
                                     .createdAt(jobTime != null ? jobTime : LocalDateTime.now())
                                     .startedAt(jobTime != null ? jobTime : LocalDateTime.now())
@@ -186,6 +186,7 @@ public class CrawlerService {
                                     .id(jobId)
                                     .seedUrls(seedUrls)
                                     .maxDepth(1) // Annahme
+                                    .sitemapCrawl(false) // NEU: Standard-Wert für bestehende Jobs
                                     .status("COMPLETED")
                                     .createdAt(LocalDateTime.now())
                                     .startedAt(LocalDateTime.now())
@@ -205,10 +206,16 @@ public class CrawlerService {
         }
     }
 
-    // Erstelle einen neuen Crawling-Job
+    // Erstelle einen neuen Crawling-Job (Fallback für Kompatibilität)
     public CrawlJob createJob(List<String> seedUrls, int maxDepth, String outputDir) {
-        CrawlJob job = CrawlJob.create(seedUrls, maxDepth, outputDir);
+        return createJob(seedUrls, maxDepth, outputDir, false);
+    }
+
+    // NEU: Erstelle einen neuen Crawling-Job mit Sitemap-Option
+    public CrawlJob createJob(List<String> seedUrls, int maxDepth, String outputDir, boolean sitemapCrawl) {
+        CrawlJob job = CrawlJob.create(seedUrls, maxDepth, outputDir, sitemapCrawl);
         jobs.put(job.getId(), job);
+        logger.info("Created new crawl job: {} with sitemap crawling: {}", job.getId(), sitemapCrawl);
         return job;
     }
 
@@ -224,18 +231,16 @@ public class CrawlerService {
 
         executorService.submit(() -> {
             try {
-                // Topologie ausführen
+                // NEU: Sitemap-Flag an TopologyRunner weiterleiten
                 TopologyRunner.runTopology(
                         job.getSeedUrls().toArray(new String[0]),
                         job.getMaxDepth(),
                         job.getOutputDirectory(),
-                        job.getId()
+                        job.getId(),
+                        job.isSitemapCrawl()
                 );
 
                 // Nach erfolgreichem Abschluss
-                int crawledCount = countCrawledUrls(job.getOutputDirectory());
-                job.setCrawledUrlsCount(crawledCount);
-
                 job.setStatus("COMPLETED");
                 job.setCompletedAt(LocalDateTime.now());
 
@@ -273,31 +278,11 @@ public class CrawlerService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Ermittelt die Anzahl der gecrawlten URLs aus dem Output-Verzeichnis
-     */
-    private int countCrawledUrls(String outputDirectory) {
-        try {
-            Path indexFilePath = Paths.get(outputDirectory, "crawl_index.json");
-
-            if (!Files.exists(indexFilePath)) {
-                logger.warn("Index-Datei nicht gefunden: {}", indexFilePath);
-                return 0;
-            }
-
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode rootNode = mapper.readTree(indexFilePath.toFile());
-            JsonNode urlsArray = rootNode.get("crawled_urls");
-
-            if (urlsArray != null && urlsArray.isArray()) {
-                int count = urlsArray.size();
-                logger.info("Gefunden: {} gecrawlte URLs in {}", count, indexFilePath);
-                return count;
-            }
-        } catch (IOException e) {
-            logger.error("Fehler beim Zählen der gecrawlten URLs", e);
+    // Aktualisiere Job-Statistiken
+    public void updateJobStats(String jobId, int crawledUrlsCount) {
+        CrawlJob job = jobs.get(jobId);
+        if (job != null) {
+            job.setCrawledUrlsCount(crawledUrlsCount);
         }
-
-        return 0;
     }
 }

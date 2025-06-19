@@ -17,6 +17,12 @@ public class StudyChatConstants {
     public static final String OUTPUT_DIR_CONFIG_KEY = "output.dir";
     public static final String CRAWLER_ID_CONFIG_KEY = "crawler.id";
 
+    // NEU: Sitemap-Konfigurationsschlüssel
+    public static final String SITEMAP_CRAWL_ENABLED_KEY = "sitemap.crawl.enabled";
+    public static final String SITEMAP_DISCOVERY_KEY = "sitemap.discovery";
+    public static final String SITEMAP_STRICT_MODE_KEY = "sitemap.strict.mode";
+    public static final String SITEMAP_URLS_KEY = "sitemap.urls";
+
     // Status-Metadata
     public static final String REDIRECT_SOURCE_KEY = "redirect.source";
     public static final String STATUS_KEY = "status";
@@ -46,6 +52,16 @@ public class StudyChatConstants {
     public static final int DEFAULT_MAX_RETRIES = 3;
     public static final String DEFAULT_OUTPUT_DIR = "./collected-content";
     public static final String DEFAULT_INDEX_FILE = "crawl_index.json";
+
+    // NEU: Sitemap-Standard-Werte
+    public static final boolean DEFAULT_SITEMAP_CRAWL = false;
+    public static final String DEFAULT_SITEMAP_FILE = "sitemap.xml";
+    public static final String[] COMMON_SITEMAP_PATHS = {
+            "/sitemap.xml",
+            "/sitemap_index.xml",
+            "/sitemaps/sitemap.xml",
+            "/sitemap/sitemap.xml"
+    };
 
     // User-Agent Informationen
     public static final String USER_AGENT_NAME = "StudyChat-Bot";

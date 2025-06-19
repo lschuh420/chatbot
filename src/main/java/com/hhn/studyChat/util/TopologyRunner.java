@@ -11,7 +11,13 @@ import java.util.Properties;
 
 public class TopologyRunner {
 
+    // NEU: Überladen der Methode für Rückwärtskompatibilität
     public static void runTopology(String[] seedUrls, int maxDepth, String outputDir, String jobId) throws Exception {
+        runTopology(seedUrls, maxDepth, outputDir, jobId, false);
+    }
+
+    // NEU: Erweiterte Methode mit Sitemap-Parameter
+    public static void runTopology(String[] seedUrls, int maxDepth, String outputDir, String jobId, boolean sitemapCrawl) throws Exception {
         // Config-Map erstellen
         Config conf = new Config();
 
@@ -20,6 +26,45 @@ public class TopologyRunner {
         conf.put(StudyChatConstants.MAX_DEPTH_CONFIG_KEY, maxDepth);
         conf.put(StudyChatConstants.OUTPUT_DIR_CONFIG_KEY, outputDir);
 
+        // NEU: Sitemap-Konfiguration
+        conf.put("sitemap.crawl.enabled", sitemapCrawl);
+        if (sitemapCrawl) {
+            System.out.println("🗺️ SITEMAP-MODUS AKTIVIERT");
+            // Sitemap-spezifische Konfiguration
+            conf.put("parser.emitOutlinks", false); // Keine normalen Links extrahieren
+            conf.put("sitemap.discovery", true);    // Sitemap-Discovery aktivieren
+            conf.put("sitemap.strict.mode", true);  // Nur Sitemap-URLs verwenden
+            conf.put("fetcher.max.urls", 1000);     // Mehr URLs für Sitemaps
+
+            // Die Seed-URLs als Sitemap-URLs markieren
+            StringBuilder sitemapUrls = new StringBuilder();
+            for (int i = 0; i < seedUrls.length; i++) {
+                String url = seedUrls[i];
+                // Versuche, Sitemap-URL zu konstruieren
+                if (!url.endsWith("sitemap.xml") && !url.contains("sitemap")) {
+                    // Automatisch /sitemap.xml anhängen, wenn nicht schon vorhanden
+                    if (url.endsWith("/")) {
+                        url = url + "sitemap.xml";
+                    } else {
+                        url = url + "/sitemap.xml";
+                    }
+                    seedUrls[i] = url;
+                }
+                sitemapUrls.append(url);
+                if (i < seedUrls.length - 1) {
+                    sitemapUrls.append(",");
+                }
+            }
+            conf.put("sitemap.urls", sitemapUrls.toString());
+        } else {
+            System.out.println("🌐 NORMALER CRAWL-MODUS");
+            // Normale Crawl-Konfiguration
+            conf.put("parser.emitOutlinks", true);  // URLs aus geparsten Seiten extrahieren
+            conf.put("parser.emitOutlinks.max.per.page", 60); // Max URLs pro Seite
+            conf.put("fetcher.continue.at.depth", true); // Crawling in der Tiefe fortsetzen
+            conf.put("metadata.track.depth", true); // Tiefe in Metadaten verfolgen
+        }
+
         // HTTP Agent Konfiguration
         conf.put("http.agent.name", StudyChatConstants.USER_AGENT_NAME);
         conf.put("http.agent.version", StudyChatConstants.USER_AGENT_VERSION);
@@ -27,17 +72,12 @@ public class TopologyRunner {
         conf.put("http.agent.url", StudyChatConstants.USER_AGENT_URL);
         conf.put("http.agent.email", StudyChatConstants.USER_AGENT_EMAIL);
 
-        // === REKURSIVE CRAWLER-KONFIGURATION ===
-        // WICHTIG: Diese Einstellungen aktivieren rekursives Crawling!
-        conf.put("parser.emitOutlinks", true);  // URLs aus geparsten Seiten extrahieren
-        conf.put("parser.emitOutlinks.max.per.page", 60); // Max URLs pro Seite
-        conf.put("fetcher.continue.at.depth", true); // Crawling in der Tiefe fortsetzen
-        conf.put("metadata.track.depth", true); // Tiefe in Metadaten verfolgen
-
         // === STABILITÄT & PERFORMANCE ===
         conf.put("fetcher.server.delay", 2.0); // 2 Sekunden Delay zwischen Requests
         conf.put("fetcher.threads.number", 1); // Nur 1 Thread für Stabilität
-        conf.put("fetcher.max.urls", 50); // Max URLs pro Batch
+        if (!sitemapCrawl) {
+            conf.put("fetcher.max.urls", 50); // Max URLs pro Batch (nur bei normalem Crawling)
+        }
 
         // Storm-Konfiguration für Stabilität
         conf.put("topology.message.timeout.secs", 120); // 2 Minuten Timeout
@@ -60,13 +100,19 @@ public class TopologyRunner {
         loadCustomConfig(conf);
 
         // === KONFIGURATION AUSGEBEN ===
-        System.out.println("=== Simplified Crawler Configuration ===");
+        System.out.println("=== Crawler Configuration ===");
         System.out.println("Job ID: " + jobId);
         System.out.println("Seed URLs: " + String.join(", ", seedUrls));
         System.out.println("Max Depth: " + maxDepth);
         System.out.println("Output Directory: " + outputDir);
-        System.out.println("Parser emits outlinks: " + conf.get("parser.emitOutlinks"));
-        System.out.println("Max URLs per page: " + conf.get("parser.emitOutlinks.max.per.page"));
+        System.out.println("Sitemap Crawling: " + (sitemapCrawl ? "ENABLED" : "DISABLED"));
+        if (sitemapCrawl) {
+            System.out.println("Sitemap Discovery: " + conf.get("sitemap.discovery"));
+            System.out.println("Strict Mode: " + conf.get("sitemap.strict.mode"));
+        } else {
+            System.out.println("Parser emits outlinks: " + conf.get("parser.emitOutlinks"));
+            System.out.println("Max URLs per page: " + conf.get("parser.emitOutlinks.max.per.page"));
+        }
         System.out.println("Fetcher delay: " + conf.get("fetcher.server.delay") + " seconds");
         System.out.println("Max spout pending: " + conf.get("topology.max.spout.pending"));
         System.out.println("=======================================");
@@ -82,8 +128,13 @@ public class TopologyRunner {
             System.out.println("✓ Topology erfolgreich gestartet!");
             System.out.println("Warte auf Abschluss...");
 
-            // Dynamische Wartezeit basierend auf der Tiefe
-            int waitTimeSeconds = Math.max(120, maxDepth * 60); // Min 2 Min, dann 1 Min pro Tiefe
+            // Dynamische Wartezeit basierend auf der Tiefe oder Sitemap-Modus
+            int waitTimeSeconds;
+            if (sitemapCrawl) {
+                waitTimeSeconds = Math.max(180, seedUrls.length * 60); // Min 3 Min, dann 1 Min pro Sitemap
+            } else {
+                waitTimeSeconds = Math.max(120, maxDepth * 60); // Min 2 Min, dann 1 Min pro Tiefe
+            }
             System.out.println("Wartezeit: " + waitTimeSeconds + " Sekunden");
 
             // Warten mit Status-Updates
@@ -125,6 +176,7 @@ public class TopologyRunner {
         System.out.println("=== Crawling Abgeschlossen ===");
         checkOutputDirectory(outputDir);
         System.out.println("Job ID: " + jobId);
+        System.out.println("Modus: " + (sitemapCrawl ? "Sitemap" : "Normal"));
         System.out.println("============================");
     }
 
@@ -218,9 +270,10 @@ public class TopologyRunner {
         int testDepth = 2;
         String testOutputDir = "./test-crawl-output";
         String testJobId = "test-job-" + System.currentTimeMillis();
+        boolean testSitemapCrawl = true;
 
-        System.out.println("Starte Test-Crawl...");
-        runTopology(testUrls, testDepth, testOutputDir, testJobId);
+        System.out.println("Starte Test-Crawl mit Sitemap...");
+        runTopology(testUrls, testDepth, testOutputDir, testJobId, testSitemapCrawl);
         System.out.println("Test-Crawl abgeschlossen!");
     }
 }
