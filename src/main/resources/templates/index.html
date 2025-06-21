@@ -227,7 +227,14 @@
         const urls = urlsText.split('\n').filter(url => url.trim() !== '');
         const depth = document.getElementById('depth').value;
         const outputDir = document.getElementById('outputDir').value;
-        const sitemapCrawl = document.getElementById('sitemapCheck').checked; // NEU: Checkbox-Wert auslesen
+        const sitemapCrawl = document.getElementById('sitemapCheck').checked;
+
+        console.log('Form submission:', {
+            urls: urls,
+            depth: depth,
+            outputDir: outputDir,
+            sitemapCrawl: sitemapCrawl
+        });
 
         if (urls.length === 0) {
             alert('Bitte mindestens eine URL eingeben.');
@@ -240,20 +247,26 @@
         submitButton.disabled = true;
         submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Wird erstellt...';
 
+        // Erstelle den Request Body
+        const formData = new URLSearchParams({
+            'url': urls,
+            'depth': depth,
+            'outputDir': outputDir,
+            'sitemapCrawl': sitemapCrawl  // Boolean wird automatisch zu String konvertiert
+        });
+
+        console.log('Request body:', formData.toString());
+
         // Erstelle einen neuen Job
         fetch('/api/jobs', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: new URLSearchParams({
-                'url': urls,
-                'depth': depth,
-                'outputDir': outputDir,
-                'sitemapCrawl': sitemapCrawl  // NEU: Sitemap-Parameter mitschicken
-            })
+            body: formData
         })
             .then(response => {
+                console.log('Response status:', response.status);
                 if (!response.ok) {
                     return response.json().then(data => {
                         throw new Error(data.error || 'Fehler beim Erstellen des Jobs');
@@ -262,6 +275,8 @@
                 return response.json();
             })
             .then(job => {
+                console.log('Job created successfully:', job);
+
                 // Button zurücksetzen
                 submitButton.disabled = false;
                 submitButton.innerHTML = originalButtonText;
@@ -270,15 +285,17 @@
                 document.getElementById('urls').value = '';
 
                 // Erfolgsmeldung
-                alert('Job erfolgreich erstellt! ID: ' + job.id + (job.sitemapCrawl ? ' (Sitemap-Modus)' : ' (Normal-Modus)'));
+                const mode = job.sitemapCrawl ? 'Sitemap-Modus' : 'Normal-Modus';
+                alert(`Job erfolgreich erstellt! ID: ${job.id} (${mode})`);
                 window.location.reload();
             })
             .catch(error => {
+                console.error('Error creating job:', error);
+
                 // Button zurücksetzen
                 submitButton.disabled = false;
                 submitButton.innerHTML = originalButtonText;
 
-                console.error('Error:', error);
                 alert(error.message || 'Fehler beim Erstellen des Jobs');
             });
     });
