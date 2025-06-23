@@ -52,11 +52,14 @@ public class RAGService {
     private final CrawlerService crawlerService;
 
     // === LOKALE OPEN WEBUI KONFIGURATION ===
-    @Value("${openwebui.host:localhost}")
+    @Value("${openwebui.host:inference.it.hs-heilbronn.de}")
     private String openWebUIHost;
 
-    @Value("${openwebui.port:3000}")
+    @Value("${openwebui.port:443}")
     private int openWebUIPort;
+
+    @Value("${openwebui.ssl:true}")
+    private boolean openWebUISSL;
 
     @Value("${openwebui.api.key:}")
     private String openWebUIApiKey;
@@ -102,10 +105,11 @@ public class RAGService {
         logger.info("=== INITIALISIERE RAG-SERVICE MIT LOKALER OPEN WEBUI ===");
 
         // === LOKALES LLM ÜBER OPEN WEBUI KONFIGURIEREN ===
-        String openWebUIBaseUrl = String.format("http://%s:%d/api", openWebUIHost, openWebUIPort);
-
+        String protocol = openWebUISSL ? "https" : "http";
+        String openWebUIBaseUrl = String.format("%s://%s:%d/api", protocol, openWebUIHost, openWebUIPort);
         logger.info("Open WebUI Base URL: {}", openWebUIBaseUrl);
         logger.info("Verwendetes Modell: {}", openWebUIModel);
+        logger.info("SSL aktiviert: {}", openWebUISSL);
 
         try {
             // OpenAI-kompatible API über Open WebUI
@@ -114,14 +118,18 @@ public class RAGService {
                     .modelName(openWebUIModel)
                     .temperature(0.7);
 
-            // API Key nur setzen wenn vorhanden
-            if (openWebUIApiKey != null && !openWebUIApiKey.trim().isEmpty()) {
+            // API Key konfigurieren und validieren
+            if (openWebUIApiKey != null && !openWebUIApiKey.trim().isEmpty() &&
+                    !openWebUIApiKey.equals("sk-YOUR-GENERATED-API-KEY-HERE")) {
                 chatModelBuilder.apiKey(openWebUIApiKey);
-                logger.info("API Key für Open WebUI konfiguriert");
+                logger.info("✓ API Key für Open WebUI konfiguriert");
             } else {
-                // Fallback API Key für Open WebUI (oft nicht erforderlich bei lokaler Installation)
-                chatModelBuilder.apiKey("sk-not-needed-for-local");
-                logger.info("Verwende Fallback API Key für lokale Open WebUI");
+                logger.error("❌ FEHLER: Gültiger API Key erforderlich!");
+                logger.error("1. Öffnen Sie: {}", openWebUIBaseUrl.replace("/api", ""));
+                logger.error("2. Anmelden und zu Settings → Account gehen");
+                logger.error("3. API Key generieren");
+                logger.error("4. In application.properties eintragen: openwebui.api.key=sk-...");
+                throw new RuntimeException("API Key erforderlich für Open WebUI");
             }
 
             chatModel = chatModelBuilder.build();
