@@ -265,4 +265,15 @@ public class TopologyRunner {
         runTopology(testUrls, testDepth, testOutputDir, testJobId, testSitemapCrawl);
         System.out.println("Test-Crawl abgeschlossen!");
     }
+    public static void shutdownGracefully(LocalCluster cluster, String jobId) {
+        try {
+            System.out.println("Beende Topology gracefully...");
+            cluster.killTopology(jobId);
+            Thread.sleep(5000); // Warte 5 Sekunden
+            cluster.close();
+            System.out.println("Topology beendet");
+        } catch (Exception e) {
+            System.err.println("Fehler beim Beenden: " + e.getMessage());
+        }
+    }
 }
