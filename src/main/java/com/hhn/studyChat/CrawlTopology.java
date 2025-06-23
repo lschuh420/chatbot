@@ -1,14 +1,17 @@
 package com.hhn.studyChat;
 
 import com.digitalpebble.stormcrawler.ConfigurableTopology;
+import com.digitalpebble.stormcrawler.Constants;
 import com.digitalpebble.stormcrawler.bolt.*;
 import com.digitalpebble.stormcrawler.spout.MemorySpout;
 import com.digitalpebble.stormcrawler.tika.ParserBolt;
 import com.digitalpebble.stormcrawler.tika.RedirectionBolt;
 import com.hhn.studyChat.util.bolt.HHNStructuredDataBolt;
 import com.hhn.studyChat.util.bolt.RAGJSONFileWriterBolt;
+import com.hhn.studyChat.util.bolt.URLExtractorBolt;
 import org.apache.storm.topology.TopologyBuilder;
 import org.apache.storm.tuple.Fields;
+import org.apache.storm.Config;
 
 import java.util.Properties;
 import java.io.FileInputStream;
@@ -16,13 +19,13 @@ import java.io.InputStream;
 import java.io.File;
 
 /**
- * Topologie für Web-Crawling
+ * Vereinfachte Topologie für Web-Crawling mit Sitemap-Unterstützung
  */
 public class CrawlTopology extends ConfigurableTopology {
 
 	private final String[] seedUrls;
+	private Config runtimeConfig;
 
-	// Standardkonstruktor für die CLI-Ausführung
 	public CrawlTopology() {
 		this(new String[]{"https://www.hs-heilbronn.de/de"});
 	}
@@ -31,30 +34,25 @@ public class CrawlTopology extends ConfigurableTopology {
 		this.seedUrls = seedUrls;
 	}
 
+	public CrawlTopology(String[] seedUrls, Config runtimeConfig) {
+		this.seedUrls = seedUrls;
+		this.runtimeConfig = runtimeConfig;
+	}
+
 	public static void main(String[] args) throws Exception {
 		ConfigurableTopology.start(new CrawlTopology(), args);
 	}
 
 	@Override
 	protected int run(String[] args) {
-		// Die von der Elternklasse geerbte Konfiguration verwenden
-
-		// Konfiguration aus der Eigenschaftsdatei laden
 		loadCustomConfiguration();
-
-		// Topologie erstellen und einreichen
 		return submit("crawl", conf, createTopology());
 	}
 
-	/**
-	 * Lädt benutzerdefinierte Konfigurationen aus einer Properties-Datei
-	 */
 	private void loadCustomConfiguration() {
 		try {
-			// Zuerst versuchen, die Datei im Ressourcenverzeichnis zu finden
 			InputStream is = getClass().getClassLoader().getResourceAsStream("crawler-config.properties");
 
-			// Wenn nicht als Ressource verfügbar, als Datei im aktuellen Verzeichnis suchen
 			if (is == null) {
 				File file = new File("crawler-config.properties");
 				if (file.exists()) {
@@ -62,12 +60,10 @@ public class CrawlTopology extends ConfigurableTopology {
 				}
 			}
 
-			// Wenn eine Konfigurationsdatei gefunden wurde, laden
 			if (is != null) {
 				Properties props = new Properties();
 				props.load(is);
 
-				// Alle Properties in die Storm-Konfiguration übertragen
 				for (String key : props.stringPropertyNames()) {
 					conf.put(key, props.getProperty(key));
 				}
@@ -76,13 +72,11 @@ public class CrawlTopology extends ConfigurableTopology {
 				System.out.println("Crawler-Konfiguration erfolgreich geladen.");
 			} else {
 				System.err.println("WARNUNG: crawler-config.properties nicht gefunden. Verwende Standardkonfiguration.");
-				// Mindestens den HTTP-Agent setzen, um den Fehler zu vermeiden
 				conf.put("http.agent.name", "StudyChat-Bot/1.0");
 			}
 		} catch (Exception e) {
 			System.err.println("Fehler beim Laden der Crawler-Konfiguration: " + e.getMessage());
 			e.printStackTrace();
-			// Mindestens den HTTP-Agent setzen, um den Fehler zu vermeiden
 			conf.put("http.agent.name", "StudyChat-Bot/1.0");
 		}
 	}
@@ -90,28 +84,116 @@ public class CrawlTopology extends ConfigurableTopology {
 	public TopologyBuilder createTopology() {
 		TopologyBuilder builder = new TopologyBuilder();
 
-		// Verwende die seedUrls-Instanzvariable
-		builder.setSpout("spout", new MemorySpout(seedUrls));
+		// Verwende Runtime-Config falls verfügbar
+		Config configToUse = runtimeConfig != null ? runtimeConfig : conf;
 
-		builder.setBolt("partitioner", new URLPartitionerBolt()).shuffleGrouping("spout");
+		// Prüfe, ob Sitemap-Crawling aktiviert ist
+		boolean sitemapCrawlEnabled = false;
+		try {
+			Object sitemapEnabled = configToUse.get("sitemap.crawl.enabled");
+			if (sitemapEnabled != null) {
+				if (sitemapEnabled instanceof Boolean) {
+					sitemapCrawlEnabled = (Boolean) sitemapEnabled;
+				} else {
+					sitemapCrawlEnabled = Boolean.parseBoolean(sitemapEnabled.toString());
+				}
+			}
+		} catch (Exception e) {
+			System.err.println("Fehler beim Lesen der Sitemap-Konfiguration: " + e.getMessage());
+		}
 
-		builder.setBolt("fetch", new FetcherBolt()).fieldsGrouping("partitioner", new Fields("key"));
+		System.out.println("=== Building SIMPLIFIED Crawl Topology ===");
+		System.out.println("Sitemap Crawling: " + (sitemapCrawlEnabled ? "ENABLED" : "DISABLED"));
 
-		builder.setBolt("sitemap", new SiteMapParserBolt()).localOrShuffleGrouping("fetch");
+		// 1. SPOUT: Startet mit Seed-URLs
+		builder.setSpout("spout", new MemorySpout(seedUrls), 1);
+		System.out.println("✓ Spout configured with " + seedUrls.length + " seed URLs");
 
-		builder.setBolt("feeds", new FeedParserBolt()).localOrShuffleGrouping("sitemap");
+		// 2. URL PARTITIONER: Verteilt URLs nach Host
+		if (sitemapCrawlEnabled) {
+			// Bei Sitemap-Crawling: Empfange URLs vom Spout UND vom Sitemap-Parser
+			builder.setBolt("partitioner", new URLPartitionerBolt(), 1)
+					.shuffleGrouping("spout")
+					.shuffleGrouping("sitemap", Constants.StatusStreamName); // Direkt vom SiteMapParserBolt
+			System.out.println("✓ URL Partitioner configured (Sitemap mode - receives URLs from sitemap parser)");
+		} else {
+			// Normaler Modus: Rekursive URLs vom URL-Extractor empfangen
+			builder.setBolt("partitioner", new URLPartitionerBolt(), 1)
+					.shuffleGrouping("spout")
+					.shuffleGrouping("urlextractor");
+			System.out.println("✓ URL Partitioner configured (Normal mode - recursive URLs enabled)");
+		}
 
-		builder.setBolt("parse", new JSoupParserBolt()).localOrShuffleGrouping("feeds");
+		// 3. FETCHER: Lädt Webseiten herunter
+		builder.setBolt("fetch", new FetcherBolt(), 1)
+				.fieldsGrouping("partitioner", new Fields("key"));
+		System.out.println("✓ Fetcher configured");
 
-		builder.setBolt("shunt", new RedirectionBolt()).localOrShuffleGrouping("parse");
+		// 4. SITEMAP PARSER: Verarbeitet Sitemaps UND normale Seiten
+		builder.setBolt("sitemap", new SiteMapParserBolt(), 1)
+				.localOrShuffleGrouping("fetch");
+		System.out.println("✓ Sitemap Parser configured");
 
-		builder.setBolt("tika", new ParserBolt()).localOrShuffleGrouping("shunt", "tika");
+		// 5. FEED PARSER: Verarbeitet RSS/Atom Feeds
+		builder.setBolt("feeds", new FeedParserBolt(), 1)
+				.localOrShuffleGrouping("sitemap");
 
-		builder.setBolt("hhnstructured", new HHNStructuredDataBolt()).localOrShuffleGrouping("parse");
+		// 6. HTML PARSER: Extrahiert Text und Links
+		builder.setBolt("parse", new JSoupParserBolt(), 1)
+				.localOrShuffleGrouping("feeds")
+				.localOrShuffleGrouping("sitemap");
+		System.out.println("✓ HTML Parser configured");
 
-		builder.setBolt("ragjson", new RAGJSONFileWriterBolt("./collected-content")).localOrShuffleGrouping("hhnstructured");
+		// 7. REDIRECTION HANDLER: Behandelt Weiterleitungen
+		builder.setBolt("shunt", new RedirectionBolt(), 1)
+				.localOrShuffleGrouping("parse");
 
-		// TopologyBuilder.createTopology() gibt bereits einen StormTopology zurück
+		// 8. TIKA PARSER: Verarbeitet Nicht-HTML-Dokumente
+		builder.setBolt("tika", new ParserBolt(), 1)
+				.localOrShuffleGrouping("shunt", "tika");
+
+		// === REKURSIVE URL-VERARBEITUNG (nur bei normalem Crawling) ===
+		if (!sitemapCrawlEnabled) {
+			// URL EXTRACTOR mit DEPTH CONTROL (nur im normalen Modus)
+			builder.setBolt("urlextractor", new URLExtractorBolt(), 1)
+					.localOrShuffleGrouping("parse")
+					.localOrShuffleGrouping("tika");
+			System.out.println("✓ URL Extractor configured (Normal mode only)");
+		} else {
+			System.out.println("✓ URL Extractor DISABLED (Sitemap mode - URLs come from sitemap parser)");
+		}
+
+		// === DATENEXTRAKTION ===
+
+		// 9. HHN STRUCTURED DATA: Extrahiert strukturierte Daten
+		builder.setBolt("hhnstructured", new HHNStructuredDataBolt(), 1)
+				.localOrShuffleGrouping("parse")
+				.localOrShuffleGrouping("tika");
+		System.out.println("✓ HHN Structured Data Extractor configured");
+
+		// 10. JSON WRITER: Schreibt Ergebnisse in JSON-Dateien
+		String outputDir = configToUse.get("output.dir") != null ?
+				configToUse.get("output.dir").toString() : "./collected-content";
+		builder.setBolt("ragjson", new RAGJSONFileWriterBolt(outputDir), 1)
+				.localOrShuffleGrouping("hhnstructured");
+		System.out.println("✓ JSON Writer configured with output dir: " + outputDir);
+
+		System.out.println("=== SIMPLIFIED Topology Complete ===");
+		if (sitemapCrawlEnabled) {
+			System.out.println("SITEMAP MODE Data Flow:");
+			System.out.println("  Spout → Partitioner → Fetch → SitemapParser");
+			System.out.println("            ↑                       ↓");
+			System.out.println("            └── New URLs ←──────────┘");
+			System.out.println("  SitemapParser → Parse → HHNStructured → JSONWriter");
+		} else {
+			System.out.println("NORMAL MODE Data Flow:");
+			System.out.println("  Spout → Partitioner → Fetch → SitemapParser → Parse → URLExtractor");
+			System.out.println("            ↑                                              ↓");
+			System.out.println("            └─────── New URLs (filtered) ←─────────────────┘");
+			System.out.println("  Parse → HHNStructured → JSONWriter");
+		}
+		System.out.println("========================================");
+
 		return builder;
 	}
 }

@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -113,6 +112,7 @@ public class CrawlerService {
                                     .id(jobId)
                                     .seedUrls(seedUrls)
                                     .maxDepth(1) // Annahme
+                                    .sitemapCrawl(false) // NEU: Standard-Wert für bestehende Jobs
                                     .status("COMPLETED")
                                     .createdAt(jobTime != null ? jobTime : LocalDateTime.now())
                                     .startedAt(jobTime != null ? jobTime : LocalDateTime.now())
@@ -186,6 +186,7 @@ public class CrawlerService {
                                     .id(jobId)
                                     .seedUrls(seedUrls)
                                     .maxDepth(1) // Annahme
+                                    .sitemapCrawl(false) // NEU: Standard-Wert für bestehende Jobs
                                     .status("COMPLETED")
                                     .createdAt(LocalDateTime.now())
                                     .startedAt(LocalDateTime.now())
@@ -205,10 +206,16 @@ public class CrawlerService {
         }
     }
 
-    // Erstelle einen neuen Crawling-Job
+    // Erstelle einen neuen Crawling-Job (Fallback für Kompatibilität)
     public CrawlJob createJob(List<String> seedUrls, int maxDepth, String outputDir) {
-        CrawlJob job = CrawlJob.create(seedUrls, maxDepth, outputDir);
+        return createJob(seedUrls, maxDepth, outputDir, false);
+    }
+
+    // NEU: Erstelle einen neuen Crawling-Job mit Sitemap-Option
+    public CrawlJob createJob(List<String> seedUrls, int maxDepth, String outputDir, boolean sitemapCrawl) {
+        CrawlJob job = CrawlJob.create(seedUrls, maxDepth, outputDir, sitemapCrawl);
         jobs.put(job.getId(), job);
+        logger.info("Created new crawl job: {} with sitemap crawling: {}", job.getId(), sitemapCrawl);
         return job;
     }
 
@@ -224,12 +231,13 @@ public class CrawlerService {
 
         executorService.submit(() -> {
             try {
-                // Topologie ausführen
+                // NEU: Sitemap-Flag an TopologyRunner weiterleiten
                 TopologyRunner.runTopology(
                         job.getSeedUrls().toArray(new String[0]),
                         job.getMaxDepth(),
                         job.getOutputDirectory(),
-                        job.getId()
+                        job.getId(),
+                        job.isSitemapCrawl()
                 );
 
                 // Nach erfolgreichem Abschluss

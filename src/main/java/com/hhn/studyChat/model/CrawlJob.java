@@ -12,6 +12,7 @@ public class CrawlJob {
     private String id;
     private List<String> seedUrls;
     private int maxDepth;
+    private boolean sitemapCrawl;
     private String status; // QUEUED, RUNNING, COMPLETED, FAILED
     private LocalDateTime createdAt;
     private LocalDateTime startedAt;
@@ -19,11 +20,12 @@ public class CrawlJob {
     private String outputDirectory;
     private int crawledUrlsCount;
 
-    public static CrawlJob create(List<String> seedUrls, int maxDepth, String outputDir) {
+    public static CrawlJob create(List<String> seedUrls, int maxDepth, String outputDir, boolean sitemapCrawl) {
         return CrawlJob.builder()
                 .id(UUID.randomUUID().toString())
                 .seedUrls(seedUrls)
                 .maxDepth(maxDepth)
+                .sitemapCrawl(sitemapCrawl)
                 .status("QUEUED")
                 .createdAt(LocalDateTime.now())
                 .outputDirectory(outputDir)
