@@ -42,14 +42,17 @@ public class CrawlerController {
     @PostMapping("/api/jobs")
     public ResponseEntity<?> createJob(@RequestParam("url") List<String> urls,
                                        @RequestParam(value = "depth", defaultValue = "1") int depth,
-                                       @RequestParam(value = "outputDir", defaultValue = "./collected-content") String outputDir) {
+                                       @RequestParam(value = "outputDir", defaultValue = "./collected-content") String outputDir,
+                                       @RequestParam(value = "sitemapCrawl", defaultValue = "false") boolean sitemapCrawl) { // NEU: Sitemap-Parameter
+
         // validate output directory
         if (!isValidDirectory(outputDir)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Invalid output directory may contain illegal characters."));
         }
 
-        CrawlJob job = crawlerService.createJob(urls, depth, outputDir);
+        // NEU: Sitemap-Parameter an createJob weiterleiten
+        CrawlJob job = crawlerService.createJob(urls, depth, outputDir, sitemapCrawl);
         return ResponseEntity.ok(job);
     }
 

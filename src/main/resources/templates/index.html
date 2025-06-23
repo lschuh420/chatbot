@@ -122,13 +122,27 @@
                         <textarea class="form-control" id="urls" rows="3" required
                                   placeholder="https://www.example.com"></textarea>
                     </div>
-                    <div class="mb-3">
-                        <label for="depth" class="form-label">
+
+                    <div id="crawlDepthGroup" class="mb-3">
+                        <label for="depth" class="form-label" id="crawlDepthLabel">
                             <i class="bi bi-layers me-1"></i>Crawl-Tiefe
                         </label>
-                        <input type="number" class="form-control" id="depth" value="1" min="1" max="5">
-                        <div class="form-text">Wie tief soll der Crawler in die Website vordringen? (1-5)</div>
+                        <input type="number" class="form-control" id="depth" value="1" min="0" max="3">
+                        <div class="form-text" id="crawlDepthHelp">
+                            Wie tief soll der Crawler in die Website vordringen? (0-3)
+                        </div>
                     </div>
+
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="sitemapCheck">
+                        <label class="form-check-label" for="sitemapCheck">
+                            <i class="bi bi-file-earmark-text me-1"></i>Sitemap crawlen
+                        </label>
+                        <div class="form-text">
+                            Aktiviert Sitemap-basiertes Crawling (ignoriert Crawl-Tiefe und crawlt alle URLs aus der Sitemap)
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <label for="directorySelector" class="form-label">
                             <i class="bi bi-folder me-1"></i>Ausgabeverzeichnis
@@ -140,6 +154,7 @@
                         </div>
                         <div class="form-text">Wähle ein Verzeichnis aus, wo die Crawler-Daten gespeichert werden sollen.</div>
                     </div>
+
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-play-fill me-1"></i>Job erstellen
                     </button>
@@ -179,6 +194,7 @@
                             </h6>
                             <p class="card-text">
                                 <i class="bi bi-layers me-1"></i>Tiefe: <span th:text="${job.maxDepth}">1</span><br>
+                                <i class="bi bi-file-earmark-text me-1"></i>Sitemap: <span th:text="${job.sitemapCrawl ? 'Ja' : 'Nein'}">Nein</span><br>
                                 <i class="bi bi-calendar me-1"></i>Erstellt: <span th:text="${job.createdAt}">Datum</span><br>
                                 <i class="bi bi-link-45deg me-1"></i>Gecrawlte URLs: <span th:text="${job.crawledUrlsCount}">0</span>
                             </p>
@@ -211,6 +227,14 @@
         const urls = urlsText.split('\n').filter(url => url.trim() !== '');
         const depth = document.getElementById('depth').value;
         const outputDir = document.getElementById('outputDir').value;
+        const sitemapCrawl = document.getElementById('sitemapCheck').checked;
+
+        console.log('Form submission:', {
+            urls: urls,
+            depth: depth,
+            outputDir: outputDir,
+            sitemapCrawl: sitemapCrawl
+        });
 
         if (urls.length === 0) {
             alert('Bitte mindestens eine URL eingeben.');
@@ -223,19 +247,26 @@
         submitButton.disabled = true;
         submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Wird erstellt...';
 
+        // Erstelle den Request Body
+        const formData = new URLSearchParams({
+            'url': urls,
+            'depth': depth,
+            'outputDir': outputDir,
+            'sitemapCrawl': sitemapCrawl  // Boolean wird automatisch zu String konvertiert
+        });
+
+        console.log('Request body:', formData.toString());
+
         // Erstelle einen neuen Job
         fetch('/api/jobs', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: new URLSearchParams({
-                'url': urls,
-                'depth': depth,
-                'outputDir': outputDir
-            })
+            body: formData
         })
             .then(response => {
+                console.log('Response status:', response.status);
                 if (!response.ok) {
                     return response.json().then(data => {
                         throw new Error(data.error || 'Fehler beim Erstellen des Jobs');
@@ -244,6 +275,8 @@
                 return response.json();
             })
             .then(job => {
+                console.log('Job created successfully:', job);
+
                 // Button zurücksetzen
                 submitButton.disabled = false;
                 submitButton.innerHTML = originalButtonText;
@@ -252,15 +285,17 @@
                 document.getElementById('urls').value = '';
 
                 // Erfolgsmeldung
-                alert('Job erfolgreich erstellt! ID: ' + job.id);
+                const mode = job.sitemapCrawl ? 'Sitemap-Modus' : 'Normal-Modus';
+                alert(`Job erfolgreich erstellt! ID: ${job.id} (${mode})`);
                 window.location.reload();
             })
             .catch(error => {
+                console.error('Error creating job:', error);
+
                 // Button zurücksetzen
                 submitButton.disabled = false;
                 submitButton.innerHTML = originalButtonText;
 
-                console.error('Error:', error);
                 alert(error.message || 'Fehler beim Erstellen des Jobs');
             });
     });
@@ -364,6 +399,9 @@
                                       </a>`;
                     }
 
+                    // NEU: Sitemap-Anzeige in der dynamischen Liste
+                    const sitemapText = job.sitemapCrawl ? 'Ja' : 'Nein';
+
                     html += `
                     <div class="card job-card">
                         <div class="card-body">
@@ -381,6 +419,7 @@
                             </h6>
                             <p class="card-text">
                                 <i class="bi bi-layers me-1"></i>Tiefe: ${job.maxDepth}<br>
+                                <i class="bi bi-file-earmark-text me-1"></i>Sitemap: ${sitemapText}<br>
                                 <i class="bi bi-calendar me-1"></i>Erstellt: ${job.createdAt}<br>
                                 <i class="bi bi-link-45deg me-1"></i>Gecrawlte URLs: ${job.crawledUrlsCount || 0}
                             </p>
@@ -407,8 +446,39 @@
                 refreshButton.disabled = false;
             });
     }
-</script>
-<script>
+
+    // 1. Elemente für checkbox logik aus DOM holen
+    const sitemapCheck = document.getElementById('sitemapCheck');
+    const depthInput   = document.getElementById('depth');
+    const depthLabel   = document.getElementById('crawlDepthLabel');
+    const depthHelp    = document.getElementById('crawlDepthHelp');
+
+    // 2. Funktion: Crawl-Tiefe aktivieren/deaktivieren
+    function toggleCrawlDepth() {
+        if (sitemapCheck.checked) {
+            // Checkbox ist gesetzt → Crawl-Tiefe ausgrauen und deaktivieren
+            depthInput.disabled = true;
+            depthLabel.classList.add('text-muted');
+            depthHelp.classList.add('text-muted');
+            depthHelp.textContent = 'Bei Sitemap-Crawling wird die Tiefe ignoriert - alle URLs aus der Sitemap werden gecrawlt';
+        } else {
+            // Checkbox ist nicht gesetzt → Crawl-Tiefe wieder aktivieren
+            depthInput.disabled = false;
+            depthLabel.classList.remove('text-muted');
+            depthHelp.classList.remove('text-muted');
+            depthHelp.textContent = 'Wie tief soll der Crawler in die Website vordringen? (0-3)';
+        }
+    }
+
+    // 3. Event-Listener an die Checkbox hängen
+    sitemapCheck.addEventListener('change', toggleCrawlDepth);
+
+    // 4. Beim Laden der Seite initial prüfen (falls man z.B. mit devtools vorher gesetzt hat)
+    window.addEventListener('DOMContentLoaded', () => {
+        toggleCrawlDepth();
+    });
+
+    // NEU: Verzeichnisauswahl-Funktionalität aus paste.txt
     document.addEventListener('DOMContentLoaded', function() {
         const directorySelector = document.getElementById('directorySelector');
         const outputDir = document.getElementById('outputDir');
