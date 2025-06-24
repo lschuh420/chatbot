@@ -163,13 +163,13 @@
 		<dependency>
 			<groupId>io.qdrant</groupId>
 			<artifactId>client</artifactId>
-			<version>1.14.0</version>
+			<version>1.12.0</version>  <!-- GEÄNDERT: von 1.14.0 auf 1.12.0 -->
 		</dependency>
 
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>qdrant</artifactId>
-			<version>1.21.0</version>
+			<version>1.21.2</version>  <!-- GEÄNDERT: von 1.21.0 auf 1.21.2 -->
 		</dependency>
 
 		<!-- gRPC Abhängigkeiten -->
